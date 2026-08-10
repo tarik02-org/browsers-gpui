@@ -24,6 +24,9 @@ pub mod gui;
 pub mod paths;
 pub mod utils;
 
+#[cfg(target_os = "linux")]
+pub mod communicate;
+
 mod browser_repository;
 
 #[cfg(target_os = "macos")]
@@ -667,15 +670,23 @@ pub fn handle_messages_to_main(
                 info!("refresh called");
 
                 let config = app_finder.load_config();
+                *opening_rules_and_default_profile = get_opening_rules(&config);
 
-                let visible_and_hidden_profiles =
-                    generate_all_browser_profiles(&config, &app_finder, true);
+                *visible_and_hidden_profiles =
+                    generate_all_browser_profiles(&config, app_finder, true);
 
                 let ui_browsers = UIState::real_to_ui_browsers(
                     &visible_and_hidden_profiles.visible_browser_profiles,
                 );
                 ui_sender
                     .send(MessageToUi::BrowsersUpdated(ui_browsers))
+                    .ok();
+
+                let ui_hidden_browsers = UIState::real_to_ui_browsers(
+                    &visible_and_hidden_profiles.hidden_browser_profiles,
+                );
+                ui_sender
+                    .send(MessageToUi::HiddenBrowsersUpdated(ui_hidden_browsers))
                     .ok();
             }
             MessageToMain::OpenLink(profile_index, incognito_mode, url) => {
@@ -687,12 +698,28 @@ pub fn handle_messages_to_main(
                 ui_sender.send(MessageToUi::OpenLinkCompleted).ok();
             }
             MessageToMain::UrlOpenRequest(from_bundle_id, url) => {
-                ui_sender
-                    .send(MessageToUi::UrlOpened {
-                        source_bundle_id: from_bundle_id,
-                        url,
-                    })
-                    .ok();
+                let config = app_finder.load_config();
+                let cleaned_url = unwrap_url(&url, config.get_behavior());
+                let url_open_context = UrlOpenContext {
+                    cleaned_url: cleaned_url.clone(),
+                    source_app_maybe: (!from_bundle_id.is_empty())
+                        .then_some(from_bundle_id.clone()),
+                };
+
+                if open_link_if_matching_rule(
+                    &url_open_context,
+                    opening_rules_and_default_profile,
+                    visible_and_hidden_profiles,
+                ) {
+                    ui_sender.send(MessageToUi::OpenLinkCompleted).ok();
+                } else {
+                    ui_sender
+                        .send(MessageToUi::UrlOpened {
+                            source_bundle_id: from_bundle_id,
+                            url: cleaned_url,
+                        })
+                        .ok();
+                }
             }
             MessageToMain::UrlPassedToMain(from_bundle_id, url, behavioral_config) => {
                 let new_modified_url = unwrap_url(url.as_str(), &behavioral_config);

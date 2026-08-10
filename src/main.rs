@@ -18,6 +18,45 @@ use browsers::{
 use browsers::{handle_messages_to_main, paths};
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+    let is_daemon = args.iter().any(|argument| argument == "--daemon");
+    let no_gui = args.iter().any(|argument| argument == "--no-gui");
+    let force_reload = args.iter().any(|argument| argument == "--reload");
+    let requested_url = args
+        .iter()
+        .find(|argument| argument.starts_with("http"))
+        .cloned()
+        .unwrap_or_default();
+
+    #[cfg(target_os = "linux")]
+    let wayland_available = gpui::guess_compositor() == "Wayland";
+
+    #[cfg(target_os = "linux")]
+    if !is_daemon && !no_gui && wayland_available {
+        let request = browsers::communicate::DaemonRequest {
+            url: requested_url.clone(),
+            reload: force_reload,
+        };
+        match browsers::communicate::forward_or_start(&request) {
+            Ok(()) => return,
+            Err(error) => {
+                eprintln!("Could not reach Browsers daemon, opening directly: {error}");
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    if is_daemon && !wayland_available {
+        eprintln!("Browsers daemon requires a Wayland session");
+        return;
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    if is_daemon {
+        eprintln!("Browsers daemon is currently supported only on Linux Wayland");
+        return;
+    }
+
     let offset_time = OffsetTime::local_rfc_3339().expect("could not get local offset!");
 
     let logs_root_dir = paths::get_logs_root_dir();
@@ -54,19 +93,31 @@ fn main() {
     info!("Starting Browsers");
     info!("Logging to {}", log_file_path.display());
 
-    let args: Vec<String> = env::args().collect();
-    //info!("{:?}", args);
-
-    let mut url = "".to_string();
-    let url_input_maybe = args.iter().find(|i| i.starts_with("http"));
-    if let Some(url_input) = url_input_maybe {
-        url = url_input.to_string();
-    }
-
-    let show_gui = !args.contains(&"--no-gui".to_string());
-    let force_reload = args.contains(&"--reload".to_string());
+    let show_gui = is_daemon || !no_gui;
+    let url = if is_daemon {
+        String::new()
+    } else {
+        requested_url
+    };
 
     let (main_sender, main_receiver) = mpsc::channel::<MessageToMain>();
+
+    #[cfg(target_os = "linux")]
+    let _daemon_socket = if is_daemon {
+        match browsers::communicate::start_daemon_listener(main_sender.clone()) {
+            Ok(Some(socket)) => Some(socket),
+            Ok(None) => {
+                info!("Browsers daemon is already running");
+                return;
+            }
+            Err(error) => {
+                eprintln!("Could not start Browsers daemon: {error}");
+                return;
+            }
+        }
+    } else {
+        None
+    };
 
     let app_finder = OSAppFinder::new();
     let config = app_finder.load_config();
@@ -85,11 +136,13 @@ fn main() {
         source_app_maybe: None,
     };
 
-    if open_link_if_matching_rule(
-        &url_open_context,
-        &opening_rules_and_default_profile,
-        &visible_and_hidden_profiles,
-    ) {
+    if !is_daemon
+        && open_link_if_matching_rule(
+            &url_open_context,
+            &opening_rules_and_default_profile,
+            &visible_and_hidden_profiles,
+        )
+    {
         // opened in a browser because of an opening rule, so we are done here
         return;
     }
@@ -125,5 +178,5 @@ fn main() {
         );
     });
 
-    browsers::gui::app::run(ui_state, main_sender, ui_receiver);
+    browsers::gui::app::run(ui_state, main_sender, ui_receiver, is_daemon);
 }

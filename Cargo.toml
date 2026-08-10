@@ -73,6 +73,7 @@ objc2 = "0.6.1"
 libc = "0.2.154"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
 xdg-mime = "^0.4.0"
 
 # to find application .desktop files
@@ -112,6 +113,7 @@ winres = "0.1.12"
 static_vcruntime = "3.0"
 
 [patch."https://github.com/zed-industries/zed"]
+gpui = { path = "vendor/gpui" }
 gpui_linux = { path = "vendor/gpui_linux" }
 
 #[profile.dev]

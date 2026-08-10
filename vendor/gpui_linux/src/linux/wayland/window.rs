@@ -37,7 +37,7 @@ use gpui::{
     PlatformWindow, Point, PromptButton, PromptLevel, RequestFrameOptions, ResizeEdge, Scene, Size,
     Tiling, WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowControlArea,
     WindowControls, WindowDecorations, WindowKind, WindowParams,
-    layer_shell::{Anchor, LayerShellNotSupportedError},
+    layer_shell::{Anchor, KeyboardInteractivity, LayerShellNotSupportedError},
     popup::PopupOptions,
     px, size,
 };
@@ -498,6 +498,19 @@ impl WaylandSurfaceState {
         }
     }
 
+    fn set_keyboard_interactivity(&self, interactivity: KeyboardInteractivity) -> bool {
+        if let WaylandSurfaceState::LayerShell(WaylandLayerSurfaceState { layer_surface, .. }) =
+            self
+        {
+            layer_surface.set_keyboard_interactivity(
+                super::layer_shell::wayland_keyboard_interactivity(interactivity),
+            );
+            true
+        } else {
+            false
+        }
+    }
+
     fn destroy(&mut self) {
         match self {
             WaylandSurfaceState::Xdg(WaylandXdgSurfaceState {
@@ -817,11 +830,7 @@ impl WaylandWindowStatePtr {
     /// rectangles are relative to it, while gpui coordinates are surface-local.
     pub fn window_geometry(&self) -> Bounds<Pixels> {
         let state = self.state.borrow();
-        inset_by_tiling(
-            state.bounds.map_origin(|_| px(0.0)),
-            state.inset(),
-            state.tiling,
-        )
+        inset_by_tiling(state.bounds.map_origin(|_| px(0.0)), state.inset(), state.tiling)
     }
 
     pub fn ptr_eq(&self, other: &Self) -> bool {
@@ -930,13 +939,10 @@ impl WaylandWindowStatePtr {
             let mut state = self.state.borrow_mut();
             state.surface_state.ack_configure(serial);
 
-            let window_geometry = inset_by_tiling(
-                state.bounds.map_origin(|_| px(0.0)),
-                state.inset(),
-                state.tiling,
-            )
-            .map(|v| f32::from(v) as i32)
-            .map_size(|v| if v <= 0 { 1 } else { v });
+            let window_geometry =
+                inset_by_tiling(state.bounds.map_origin(|_| px(0.0)), state.inset(), state.tiling)
+                    .map(|v| f32::from(v) as i32)
+                    .map_size(|v| if v <= 0 { 1 } else { v });
 
             state.surface_state.set_geometry(
                 window_geometry.origin.x,
@@ -1820,6 +1826,16 @@ impl PlatformWindow for WaylandWindow {
         }
     }
 
+    fn set_keyboard_interactivity(&self, interactivity: KeyboardInteractivity) {
+        let state = self.borrow();
+        if state
+            .surface_state
+            .set_keyboard_interactivity(interactivity)
+        {
+            state.surface.commit();
+        }
+    }
+
     fn set_input_region(&self, region: Option<&[Bounds<Pixels>]>) {
         let state = self.borrow();
         match region {
@@ -1834,12 +1850,7 @@ impl PlatformWindow for WaylandWindow {
                     .create_region(&state.globals.qh, ());
                 for rect in rects {
                     let rect = rect.map(|pixels| f32::from(pixels) as i32);
-                    wl_region.add(
-                        rect.origin.x,
-                        rect.origin.y,
-                        rect.size.width,
-                        rect.size.height,
-                    );
+                    wl_region.add(rect.origin.x, rect.origin.y, rect.size.width, rect.size.height);
                 }
                 state.surface.set_input_region(Some(&wl_region));
                 wl_region.destroy();

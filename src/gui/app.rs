@@ -167,7 +167,9 @@ pub struct BrowserApp {
     about_window: Option<AnyWindowHandle>,
     context_menu_expanded: bool,
     picker_placement: PickerPlacement,
+    picker_visible: bool,
     is_layer_shell: bool,
+    persistent: bool,
     is_auxiliary: bool,
     _event_task: Option<Task<()>>,
     _placement_task: Option<Task<()>>,
@@ -181,6 +183,7 @@ impl BrowserApp {
         ui_receiver: Receiver<MessageToUi>,
         unwrap_urls: Arc<AtomicBool>,
         is_layer_shell: bool,
+        persistent: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -190,17 +193,23 @@ impl BrowserApp {
         let auxiliary_windows = Arc::new(AtomicUsize::new(0));
 
         let focus_handle = cx.focus_handle();
-        focus_handle.focus(window, cx);
+        let picker_visible = !persistent;
+        if picker_visible {
+            focus_handle.focus(window, cx);
+        } else {
+            window.set_input_region(Some(&[]));
+        }
 
         let activation_subscription = cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
                 this.ever_activated = true;
-            } else if this.ever_activated
+            } else if this.picker_visible
+                && this.ever_activated
                 && this.auxiliary_windows.load(Ordering::Relaxed) == 0
                 && this.state.ui_settings.visual_settings.quit_on_lost_focus
             {
-                info!("Picker lost focus; quitting");
-                cx.quit();
+                info!("Picker lost focus; dismissing");
+                this.dismiss_picker(window, cx);
             }
         });
 
@@ -220,43 +229,7 @@ impl BrowserApp {
             }
         });
 
-        let placement_task = is_layer_shell.then(|| {
-            cx.spawn_in(window, async move |this, cx| {
-                cx.background_executor()
-                    .timer(PICKER_PLACEMENT_TIMEOUT)
-                    .await;
-                loop {
-                    let placed = this
-                        .update_in(cx, |this, window, cx| {
-                            if !matches!(this.picker_placement, PickerPlacement::Waiting) {
-                                return true;
-                            }
-
-                            let viewport = window.viewport_size();
-                            if viewport.width <= px(0.0) || viewport.height <= px(0.0) {
-                                return false;
-                            }
-
-                            let size = this.current_picker_size();
-                            let origin = centered_picker_origin(viewport, size);
-                            info!(?origin, ?viewport, "Positioned layer-shell picker at fallback");
-                            this.picker_placement = PickerPlacement::Placed(origin);
-                            this.set_picker_input_region(window, size);
-                            cx.notify();
-                            true
-                        })
-                        .unwrap_or(true);
-                    if placed {
-                        break;
-                    }
-                    cx.background_executor()
-                        .timer(Duration::from_millis(25))
-                        .await;
-                }
-            })
-        });
-
-        Self {
+        let mut app = Self {
             state,
             main_sender,
             ui_receiver,
@@ -272,12 +245,18 @@ impl BrowserApp {
             about_window: None,
             context_menu_expanded: false,
             picker_placement: PickerPlacement::Waiting,
+            picker_visible,
             is_layer_shell,
+            persistent,
             is_auxiliary: false,
             _event_task: Some(event_task),
-            _placement_task: placement_task,
+            _placement_task: None,
             _activation_subscription: Some(activation_subscription),
+        };
+        if picker_visible && is_layer_shell {
+            app.start_picker_placement(window, cx);
         }
+        app
     }
 
     fn new_auxiliary(
@@ -323,12 +302,135 @@ impl BrowserApp {
             about_window: None,
             context_menu_expanded: false,
             picker_placement: PickerPlacement::Waiting,
+            picker_visible: true,
             is_layer_shell: false,
+            persistent: false,
             is_auxiliary: true,
             _event_task: None,
             _placement_task: None,
             _activation_subscription: None,
         }
+    }
+
+    fn start_picker_placement(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.is_layer_shell {
+            return;
+        }
+
+        self._placement_task = Some(cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(10))
+                .await;
+
+            let placed_at_pointer = this
+                .update_in(cx, |this, window, cx| {
+                    if !this.picker_visible
+                        || !matches!(this.picker_placement, PickerPlacement::Waiting)
+                    {
+                        return true;
+                    }
+                    if !window.is_window_hovered() {
+                        return false;
+                    }
+
+                    this.place_picker_at(window.mouse_position(), window, cx)
+                })
+                .unwrap_or(true);
+            if placed_at_pointer {
+                return;
+            }
+
+            cx.background_executor()
+                .timer(PICKER_PLACEMENT_TIMEOUT - Duration::from_millis(10))
+                .await;
+            loop {
+                let placed = this
+                    .update_in(cx, |this, window, cx| {
+                        if !this.picker_visible
+                            || !matches!(this.picker_placement, PickerPlacement::Waiting)
+                        {
+                            return true;
+                        }
+
+                        let viewport = window.viewport_size();
+                        if viewport.width <= px(0.0) || viewport.height <= px(0.0) {
+                            return false;
+                        }
+
+                        let size = this.current_picker_size();
+                        let origin = centered_picker_origin(viewport, size);
+                        info!(?origin, ?viewport, "Positioned layer-shell picker at fallback");
+                        this.picker_placement = PickerPlacement::Placed(origin);
+                        this.set_picker_input_region(window, size);
+                        cx.notify();
+                        true
+                    })
+                    .unwrap_or(true);
+                if placed {
+                    break;
+                }
+                cx.background_executor()
+                    .timer(Duration::from_millis(25))
+                    .await;
+            }
+        }));
+    }
+
+    fn place_picker_at(
+        &mut self,
+        pointer: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let viewport = window.viewport_size();
+        if viewport.width <= px(0.0) || viewport.height <= px(0.0) {
+            return false;
+        }
+
+        let size = self.current_picker_size();
+        let origin = picker_origin(pointer, viewport, size);
+        info!(?origin, cursor = ?pointer, ?viewport, "Positioned layer-shell picker");
+        self.picker_placement = PickerPlacement::Placed(origin);
+        self.set_picker_input_region(window, size);
+        cx.notify();
+        true
+    }
+
+    fn show_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.picker_visible = true;
+        self.context_menu_expanded = false;
+        self.picker_placement = PickerPlacement::Waiting;
+
+        if self.is_layer_shell {
+            window.set_input_region(None);
+            #[cfg(target_os = "linux")]
+            window.set_keyboard_interactivity(gpui::layer_shell::KeyboardInteractivity::Exclusive);
+            self.start_picker_placement(window, cx);
+        } else {
+            window.resize(self.current_picker_size());
+        }
+
+        window.activate_window();
+        self.focus_handle.focus(window, cx);
+        cx.notify();
+    }
+
+    fn dismiss_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.persistent {
+            cx.quit();
+            return;
+        }
+
+        self.picker_visible = false;
+        self.context_menu_expanded = false;
+        self.picker_placement = PickerPlacement::Waiting;
+        self._placement_task = None;
+        window.set_input_region(Some(&[]));
+        if self.is_layer_shell {
+            #[cfg(target_os = "linux")]
+            window.set_keyboard_interactivity(gpui::layer_shell::KeyboardInteractivity::None);
+        }
+        cx.notify();
     }
 
     fn drain_ui_events(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -358,8 +460,8 @@ impl BrowserApp {
         loop {
             match self.ui_receiver.try_recv() {
                 Ok(MessageToUi::OpenLinkCompleted) => {
-                    info!("Link opened; quitting Browsers");
-                    cx.quit();
+                    info!("Link opened; dismissing picker");
+                    self.dismiss_picker(window, cx);
                     return;
                 }
                 Ok(MessageToUi::UrlOpened {
@@ -368,8 +470,7 @@ impl BrowserApp {
                 }) => {
                     self.state.set_url(url.clone());
                     self.resize_picker(window);
-                    window.activate_window();
-                    self.focus_handle.focus(window, cx);
+                    self.show_picker(window, cx);
                     self.main_sender
                         .send(MessageToMain::LinkOpenedFromBundle(source_bundle_id, url))
                         .ok();
@@ -412,6 +513,9 @@ impl BrowserApp {
     }
 
     fn resize_picker(&self, window: &mut Window) {
+        if self.persistent && !self.picker_visible {
+            return;
+        }
         let size = self.current_picker_size();
         if self.is_layer_shell {
             self.set_picker_input_region(window, size);
@@ -425,7 +529,9 @@ impl BrowserApp {
     }
 
     fn set_picker_input_region(&self, window: &Window, size: Size<Pixels>) {
-        if let PickerPlacement::Placed(origin) = self.picker_placement {
+        if self.picker_visible
+            && let PickerPlacement::Placed(origin) = self.picker_placement
+        {
             window.set_input_region(Some(&[Bounds::new(origin, size)]));
         }
     }
@@ -436,20 +542,13 @@ impl BrowserApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.is_layer_shell || !matches!(self.picker_placement, PickerPlacement::Waiting) {
+        if !self.picker_visible
+            || !self.is_layer_shell
+            || !matches!(self.picker_placement, PickerPlacement::Waiting)
+        {
             return;
         }
-
-        let size = self.current_picker_size();
-        let viewport = window.viewport_size();
-        if viewport.width <= px(0.0) || viewport.height <= px(0.0) {
-            return;
-        }
-        let origin = picker_origin(event.position, viewport, size);
-        info!(?origin, cursor = ?event.position, ?viewport, "Positioned layer-shell picker");
-        self.picker_placement = PickerPlacement::Placed(origin);
-        self.set_picker_input_region(window, size);
-        cx.notify();
+        self.place_picker_at(event.position, window, cx);
     }
 
     fn expand_for_context_menu(&mut self) -> gpui::Size<gpui::Pixels> {
@@ -529,7 +628,9 @@ impl BrowserApp {
         ) {
             Ok(handle) => {
                 self.settings_window = Some(handle.into());
-                if self.is_layer_shell {
+                if self.persistent {
+                    self.dismiss_picker(window, cx);
+                } else if self.is_layer_shell {
                     window.remove_window();
                 }
             }
@@ -597,7 +698,9 @@ impl BrowserApp {
         ) {
             Ok(handle) => {
                 self.about_window = Some(handle.into());
-                if self.is_layer_shell {
+                if self.persistent {
+                    self.dismiss_picker(window, cx);
+                } else if self.is_layer_shell {
                     window.remove_window();
                 }
             }
@@ -690,7 +793,7 @@ impl BrowserApp {
         self.state.incognito_mode = event.keystroke.modifiers.shift;
         let key = event.keystroke.key.as_str();
         match key {
-            "escape" => cx.quit(),
+            "escape" => self.dismiss_picker(window, cx),
             "enter" | "space" => {
                 self.open_filtered(self.state.focused_index.unwrap_or(0));
             }
@@ -1031,6 +1134,10 @@ impl BrowserApp {
     }
 
     fn render_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+        if !self.picker_visible {
+            return gpui::div().size_full().into_any_element();
+        }
+
         if !self.is_layer_shell {
             return self.render_picker_panel(window, cx).into_any_element();
         }
@@ -1935,7 +2042,12 @@ fn should_use_layer_shell() -> bool {
     }
 }
 
-fn picker_window_options(state: &UIState, use_layer_shell: bool, cx: &App) -> WindowOptions {
+fn picker_window_options(
+    state: &UIState,
+    use_layer_shell: bool,
+    persistent: bool,
+    cx: &App,
+) -> WindowOptions {
     let bounds = Bounds::centered(None, picker_size(state), cx);
     let mut options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -1965,7 +2077,11 @@ fn picker_window_options(state: &UIState, use_layer_shell: bool, cx: &App) -> Wi
             layer: Layer::Overlay,
             anchor: Anchor::TOP | Anchor::RIGHT | Anchor::BOTTOM | Anchor::LEFT,
             exclusive_zone: Some(px(-1.0)),
-            keyboard_interactivity: KeyboardInteractivity::Exclusive,
+            keyboard_interactivity: if persistent {
+                KeyboardInteractivity::None
+            } else {
+                KeyboardInteractivity::Exclusive
+            },
             ..Default::default()
         });
         options.is_movable = false;
@@ -1986,8 +2102,9 @@ fn open_picker_window(
     ui_receiver: Rc<RefCell<Option<Receiver<MessageToUi>>>>,
     unwrap_urls: Arc<AtomicBool>,
     use_layer_shell: bool,
+    persistent: bool,
 ) -> anyhow::Result<()> {
-    let options = picker_window_options(&state, use_layer_shell, cx);
+    let options = picker_window_options(&state, use_layer_shell, persistent, cx);
     cx.open_window(options, move |window, cx| {
         let ui_receiver = ui_receiver
             .borrow_mut()
@@ -2000,6 +2117,7 @@ fn open_picker_window(
                 ui_receiver,
                 unwrap_urls,
                 use_layer_shell,
+                persistent,
                 window,
                 cx,
             )
@@ -2009,7 +2127,12 @@ fn open_picker_window(
 }
 
 /// Run the GPUI application on the current thread until its last window closes.
-pub fn run(state: UIState, main_sender: Sender<MessageToMain>, ui_receiver: Receiver<MessageToUi>) {
+pub fn run(
+    state: UIState,
+    main_sender: Sender<MessageToMain>,
+    ui_receiver: Receiver<MessageToUi>,
+    persistent: bool,
+) {
     let unwrap_urls = Arc::new(AtomicBool::new(
         state.ui_settings.behavioral_settings.unwrap_urls,
     ));
@@ -2052,15 +2175,29 @@ pub fn run(state: UIState, main_sender: Sender<MessageToMain>, ui_receiver: Rece
             ui_receiver.clone(),
             unwrap_urls.clone(),
             use_layer_shell,
+            persistent,
         );
         if let Err(error) = result {
             if !use_layer_shell {
                 panic!("could not open Browsers window: {error}");
             }
+            if persistent {
+                panic!("persistent picker requires layer-shell support: {error}");
+            }
             warn!("Layer-shell picker unavailable, using a normal popup: {error}");
-            open_picker_window(cx, state, main_sender, ui_receiver, unwrap_urls, false)
-                .expect("could not open Browsers fallback window");
+            open_picker_window(
+                cx,
+                state,
+                main_sender,
+                ui_receiver,
+                unwrap_urls,
+                false,
+                persistent,
+            )
+            .expect("could not open Browsers fallback window");
         }
-        cx.activate(true);
+        if !persistent {
+            cx.activate(true);
+        }
     });
 }
