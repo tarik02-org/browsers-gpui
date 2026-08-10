@@ -1,26 +1,25 @@
-use druid::{ExtEventSink, Target, UrlOpenInfo};
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::fmt::Debug;
-use std::process::{exit, Command};
+use std::process::{Command, exit};
 use std::str::FromStr;
-use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender};
 use tracing::{debug, info, instrument, warn};
-use url::form_urlencoded::Parse;
 use url::Url;
-
-use gui::ui;
+use url::form_urlencoded::Parse;
 
 use crate::browser_repository::{SupportedApp, SupportedAppRepository};
-use crate::gui::ui::{UIBehavioralSettings, UIProfileAndIncognito, UISettingsRule};
-use crate::gui::ui::{UIVisualSettings, UI};
+use crate::gui::model::{
+    UIBehavioralSettings, UIBrowser, UIProfileAndIncognito, UISettings, UISettingsRule, UIState,
+    UIVisualSettings,
+};
 use crate::url_rule::UrlGlobMatcher;
 use crate::utils::{
     BehavioralConfig, Config, ConfigRule, OSAppFinder, ProfileAndOptions, UIConfig,
 };
 
-mod gui;
+pub mod gui;
 
 pub mod paths;
 pub mod utils;
@@ -657,7 +656,7 @@ pub fn unwrap_url(url_str: &str, behavioral_settings: &BehavioralConfig) -> Stri
 
 pub fn handle_messages_to_main(
     main_receiver: Receiver<MessageToMain>,
-    ui_event_sink: ExtEventSink,
+    ui_sender: Sender<MessageToUi>,
     opening_rules_and_default_profile: &mut OpeningRulesAndDefaultProfile,
     visible_and_hidden_profiles: &mut VisibleAndHiddenProfiles,
     app_finder: &OSAppFinder,
@@ -672,10 +671,11 @@ pub fn handle_messages_to_main(
                 let visible_and_hidden_profiles =
                     generate_all_browser_profiles(&config, &app_finder, true);
 
-                let ui_browsers =
-                    UI::real_to_ui_browsers(&visible_and_hidden_profiles.visible_browser_profiles);
-                ui_event_sink
-                    .submit_command(ui::NEW_BROWSERS_RECEIVED, ui_browsers, Target::Global)
+                let ui_browsers = UIState::real_to_ui_browsers(
+                    &visible_and_hidden_profiles.visible_browser_profiles,
+                );
+                ui_sender
+                    .send(MessageToUi::BrowsersUpdated(ui_browsers))
                     .ok();
             }
             MessageToMain::OpenLink(profile_index, incognito_mode, url) => {
@@ -684,33 +684,24 @@ pub fn handle_messages_to_main(
                     .get(profile_index);
                 let profile = option.unwrap();
                 profile.open_link(url.as_str(), incognito_mode);
-                ui_event_sink
-                    .submit_command(
-                        ui::OPEN_LINK_IN_BROWSER_COMPLETED,
-                        "meh2".to_string(),
-                        Target::Global,
-                    )
-                    .ok();
+                ui_sender.send(MessageToUi::OpenLinkCompleted).ok();
             }
             MessageToMain::UrlOpenRequest(from_bundle_id, url) => {
-                let url_open_info = UrlOpenInfo {
-                    url: url,
-                    source_bundle_id: from_bundle_id,
-                };
-                ui_event_sink
-                    .submit_command(ui::CLEANED_URL_OPENED, url_open_info, Target::Global)
+                ui_sender
+                    .send(MessageToUi::UrlOpened {
+                        source_bundle_id: from_bundle_id,
+                        url,
+                    })
                     .ok();
             }
             MessageToMain::UrlPassedToMain(from_bundle_id, url, behavioral_config) => {
                 let new_modified_url = unwrap_url(url.as_str(), &behavioral_config);
 
-                let url_open_info = UrlOpenInfo {
-                    url: new_modified_url,
-                    source_bundle_id: from_bundle_id,
-                };
-
-                ui_event_sink
-                    .submit_command(ui::CLEANED_URL_OPENED, url_open_info, Target::Global)
+                ui_sender
+                    .send(MessageToUi::UrlOpened {
+                        source_bundle_id: from_bundle_id,
+                        url: new_modified_url,
+                    })
                     .ok();
             }
             MessageToMain::LinkOpenedFromBundle(from_bundle_id, url) => {
@@ -748,13 +739,7 @@ pub fn handle_messages_to_main(
 
                     if let Some(profile) = profile_maybe {
                         profile.open_link(new_modified_url.as_str(), incognito);
-                        ui_event_sink
-                            .submit_command(
-                                ui::OPEN_LINK_IN_BROWSER_COMPLETED,
-                                "meh2".to_string(),
-                                Target::Global,
-                            )
-                            .ok();
+                        ui_sender.send(MessageToUi::OpenLinkCompleted).ok();
                     }
                 }
             }
@@ -787,20 +772,18 @@ pub fn handle_messages_to_main(
                         !delete
                     });
 
-                let ui_browsers =
-                    UI::real_to_ui_browsers(&visible_and_hidden_profiles.visible_browser_profiles);
-                ui_event_sink
-                    .submit_command(ui::NEW_BROWSERS_RECEIVED, ui_browsers, Target::Global)
+                let ui_browsers = UIState::real_to_ui_browsers(
+                    &visible_and_hidden_profiles.visible_browser_profiles,
+                );
+                ui_sender
+                    .send(MessageToUi::BrowsersUpdated(ui_browsers))
                     .ok();
 
-                let ui_hidden_browsers =
-                    UI::real_to_ui_browsers(&visible_and_hidden_profiles.hidden_browser_profiles);
-                ui_event_sink
-                    .submit_command(
-                        ui::NEW_HIDDEN_BROWSERS_RECEIVED,
-                        ui_hidden_browsers,
-                        Target::Global,
-                    )
+                let ui_hidden_browsers = UIState::real_to_ui_browsers(
+                    &visible_and_hidden_profiles.hidden_browser_profiles,
+                );
+                ui_sender
+                    .send(MessageToUi::HiddenBrowsersUpdated(ui_hidden_browsers))
                     .ok();
             }
             MessageToMain::HideAppProfile(unique_id) => {
@@ -822,22 +805,18 @@ pub fn handle_messages_to_main(
                         .hidden_browser_profiles
                         .push(visible_profile);
 
-                    let ui_browsers = UI::real_to_ui_browsers(
+                    let ui_browsers = UIState::real_to_ui_browsers(
                         &visible_and_hidden_profiles.visible_browser_profiles,
                     );
-                    ui_event_sink
-                        .submit_command(ui::NEW_BROWSERS_RECEIVED, ui_browsers, Target::Global)
+                    ui_sender
+                        .send(MessageToUi::BrowsersUpdated(ui_browsers))
                         .ok();
 
-                    let ui_hidden_browsers = UI::real_to_ui_browsers(
+                    let ui_hidden_browsers = UIState::real_to_ui_browsers(
                         &visible_and_hidden_profiles.hidden_browser_profiles,
                     );
-                    ui_event_sink
-                        .submit_command(
-                            ui::NEW_HIDDEN_BROWSERS_RECEIVED,
-                            ui_hidden_browsers,
-                            Target::Global,
-                        )
+                    ui_sender
+                        .send(MessageToUi::HiddenBrowsersUpdated(ui_hidden_browsers))
                         .ok();
                 }
             }
@@ -868,22 +847,18 @@ pub fn handle_messages_to_main(
                         profile_order,
                     );
 
-                    let ui_browsers = UI::real_to_ui_browsers(
+                    let ui_browsers = UIState::real_to_ui_browsers(
                         &visible_and_hidden_profiles.visible_browser_profiles,
                     );
-                    ui_event_sink
-                        .submit_command(ui::NEW_BROWSERS_RECEIVED, ui_browsers, Target::Global)
+                    ui_sender
+                        .send(MessageToUi::BrowsersUpdated(ui_browsers))
                         .ok();
 
-                    let ui_hidden_browsers = UI::real_to_ui_browsers(
+                    let ui_hidden_browsers = UIState::real_to_ui_browsers(
                         &visible_and_hidden_profiles.hidden_browser_profiles,
                     );
-                    ui_event_sink
-                        .submit_command(
-                            ui::NEW_HIDDEN_BROWSERS_RECEIVED,
-                            ui_hidden_browsers,
-                            Target::Global,
-                        )
+                    ui_sender
+                        .send(MessageToUi::HiddenBrowsersUpdated(ui_hidden_browsers))
                         .ok();
                 }
             }
@@ -892,7 +867,7 @@ pub fn handle_messages_to_main(
                 &mut visible_and_hidden_profiles.visible_browser_profiles,
                 unique_id,
                 move_to,
-                &ui_event_sink,
+                &ui_sender,
             ),
             MessageToMain::SaveConfigRules(ui_rules) => {
                 info!("Saving rules");
@@ -962,28 +937,25 @@ pub fn handle_messages_to_main(
 #[instrument(skip_all)]
 pub fn prepare_ui(
     url_open_context: &UrlOpenContext,
-    main_sender: Sender<MessageToMain>,
     visible_and_hidden_profiles: &VisibleAndHiddenProfiles,
     config: &Config,
     show_set_as_default: bool,
-) -> UI {
-    return UI::new(
-        paths::get_localizations_basedir(),
-        main_sender.clone(),
+) -> UIState {
+    UIState::new(
         url_open_context.cleaned_url.as_str(),
-        UI::real_to_ui_browsers(
+        UIState::real_to_ui_browsers(
             visible_and_hidden_profiles
                 .visible_browser_profiles
                 .as_slice(),
         ),
-        UI::real_to_ui_browsers(
+        UIState::real_to_ui_browsers(
             visible_and_hidden_profiles
                 .hidden_browser_profiles
                 .as_slice(),
         ),
         show_set_as_default,
-        UI::config_to_ui_settings(&config),
-    );
+        UISettings::from_config(config),
+    )
 }
 
 pub fn open_link_if_matching_rule(
@@ -1027,7 +999,7 @@ fn move_app_profile(
     visible_browser_profiles: &mut Vec<CommonBrowserProfile>,
     unique_id: String,
     move_to: MoveTo,
-    ui_event_sink: &ExtEventSink,
+    ui_sender: &Sender<MessageToUi>,
 ) {
     let visible_profile_index_maybe = visible_browser_profiles
         .iter()
@@ -1091,9 +1063,9 @@ fn move_app_profile(
     }
 
     // 2. send visible_browser_profiles to gui
-    let ui_browsers = UI::real_to_ui_browsers(&visible_browser_profiles);
-    ui_event_sink
-        .submit_command(ui::NEW_BROWSERS_RECEIVED, ui_browsers, Target::Global)
+    let ui_browsers = UIState::real_to_ui_browsers(&visible_browser_profiles);
+    ui_sender
+        .send(MessageToUi::BrowsersUpdated(ui_browsers))
         .ok();
 
     // 3. update config file
@@ -1114,6 +1086,20 @@ pub enum MoveTo {
     DOWN,
     TOP,
     BOTTOM,
+}
+
+/// Messages sent from the backend worker to the UI layer.
+///
+/// The UI owns the receiver and decides how each message affects its state,
+/// focus, and window lifecycle.
+pub enum MessageToUi {
+    OpenLinkCompleted,
+    UrlOpened {
+        source_bundle_id: String,
+        url: String,
+    },
+    BrowsersUpdated(Vec<UIBrowser>),
+    HiddenBrowsersUpdated(Vec<UIBrowser>),
 }
 
 #[derive(Debug)]

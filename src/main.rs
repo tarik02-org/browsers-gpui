@@ -97,32 +97,33 @@ fn main() {
     let is_default = utils::is_default_web_browser();
     let show_set_as_default = !is_default;
 
-    let ui = prepare_ui(
+    let ui_state = prepare_ui(
         &url_open_context,
-        main_sender.clone(),
         &visible_and_hidden_profiles,
         &config,
         show_set_as_default,
     );
 
     if !show_gui {
-        ui.print_visible_options();
+        println!("BROWSERS");
+        println!();
+        for browser in ui_state.filtered_browsers.iter() {
+            println!("{}", browser.get_full_name());
+        }
         return;
     }
 
-    let launcher = ui.create_app_launcher();
-    let ui_event_sink = launcher.get_external_handle();
+    let (ui_sender, ui_receiver) = mpsc::channel();
 
     thread::spawn(move || {
         handle_messages_to_main(
             main_receiver,
-            ui_event_sink,
+            ui_sender,
             &mut opening_rules_and_default_profile,
             &mut visible_and_hidden_profiles,
             &app_finder,
         );
     });
 
-    let initial_ui_state = ui.create_initial_ui_state();
-    launcher.launch(initial_ui_state).expect("error");
+    browsers::gui::app::run(ui_state, main_sender, ui_receiver);
 }
