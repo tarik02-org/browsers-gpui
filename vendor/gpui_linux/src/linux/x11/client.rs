@@ -1860,7 +1860,7 @@ impl LinuxClient for X11Client {
         state
             .keyboard_focused_window
             .and_then(|focused_window| state.windows.get(&focused_window))
-            .map(|window| window.window.x_window as u64)
+            .map(|window| window.window.x_window as std::os::raw::c_ulong)
             .map(|x_window| std::future::ready(Some(WindowIdentifier::from_xid(x_window))))
             .unwrap_or(std::future::ready(None))
     }
