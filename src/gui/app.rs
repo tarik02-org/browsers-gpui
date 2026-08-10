@@ -42,6 +42,7 @@ const PICKER_MENU_EXTRA_WIDTH: f32 = 220.0;
 const PICKER_MENU_EXTRA_HEIGHT: f32 = 220.0;
 const PICKER_CURSOR_OFFSET: f32 = 8.0;
 const PICKER_SCREEN_MARGIN: f32 = 8.0;
+const PICKER_PLACEMENT_TIMEOUT: Duration = Duration::from_millis(100);
 const TRASH_ICON_PATH: &str = "icons/trash-2.svg";
 const TRASH_ICON: &[u8] = include_bytes!("../../resources/icons/trash-2.svg");
 const SETTINGS_WIDTH: f32 = 680.0;
@@ -109,6 +110,12 @@ enum Screen {
     About,
 }
 
+#[derive(Clone, Copy, Debug)]
+enum PickerPlacement {
+    Waiting,
+    Placed(Point<Pixels>),
+}
+
 enum PickerSettingsUpdate {
     Theme(ConfiguredTheme),
     ShowHotkeys(bool),
@@ -159,10 +166,11 @@ pub struct BrowserApp {
     settings_window: Option<AnyWindowHandle>,
     about_window: Option<AnyWindowHandle>,
     context_menu_expanded: bool,
-    picker_origin: Option<Point<Pixels>>,
+    picker_placement: PickerPlacement,
     is_layer_shell: bool,
     is_auxiliary: bool,
     _event_task: Option<Task<()>>,
+    _placement_task: Option<Task<()>>,
     _activation_subscription: Option<Subscription>,
 }
 
@@ -212,6 +220,42 @@ impl BrowserApp {
             }
         });
 
+        let placement_task = is_layer_shell.then(|| {
+            cx.spawn_in(window, async move |this, cx| {
+                cx.background_executor()
+                    .timer(PICKER_PLACEMENT_TIMEOUT)
+                    .await;
+                loop {
+                    let placed = this
+                        .update_in(cx, |this, window, cx| {
+                            if !matches!(this.picker_placement, PickerPlacement::Waiting) {
+                                return true;
+                            }
+
+                            let viewport = window.viewport_size();
+                            if viewport.width <= px(0.0) || viewport.height <= px(0.0) {
+                                return false;
+                            }
+
+                            let size = this.current_picker_size();
+                            let origin = centered_picker_origin(viewport, size);
+                            info!(?origin, ?viewport, "Positioned layer-shell picker at fallback");
+                            this.picker_placement = PickerPlacement::Placed(origin);
+                            this.set_picker_input_region(window, size);
+                            cx.notify();
+                            true
+                        })
+                        .unwrap_or(true);
+                    if placed {
+                        break;
+                    }
+                    cx.background_executor()
+                        .timer(Duration::from_millis(25))
+                        .await;
+                }
+            })
+        });
+
         Self {
             state,
             main_sender,
@@ -227,10 +271,11 @@ impl BrowserApp {
             settings_window: None,
             about_window: None,
             context_menu_expanded: false,
-            picker_origin: None,
+            picker_placement: PickerPlacement::Waiting,
             is_layer_shell,
             is_auxiliary: false,
             _event_task: Some(event_task),
+            _placement_task: placement_task,
             _activation_subscription: Some(activation_subscription),
         }
     }
@@ -277,10 +322,11 @@ impl BrowserApp {
             settings_window: None,
             about_window: None,
             context_menu_expanded: false,
-            picker_origin: None,
+            picker_placement: PickerPlacement::Waiting,
             is_layer_shell: false,
             is_auxiliary: true,
             _event_task: None,
+            _placement_task: None,
             _activation_subscription: None,
         }
     }
@@ -379,7 +425,7 @@ impl BrowserApp {
     }
 
     fn set_picker_input_region(&self, window: &Window, size: Size<Pixels>) {
-        if let Some(origin) = self.picker_origin {
+        if let PickerPlacement::Placed(origin) = self.picker_placement {
             window.set_input_region(Some(&[Bounds::new(origin, size)]));
         }
     }
@@ -390,15 +436,18 @@ impl BrowserApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.is_layer_shell || self.picker_origin.is_some() {
+        if !self.is_layer_shell || !matches!(self.picker_placement, PickerPlacement::Waiting) {
             return;
         }
 
         let size = self.current_picker_size();
         let viewport = window.viewport_size();
+        if viewport.width <= px(0.0) || viewport.height <= px(0.0) {
+            return;
+        }
         let origin = picker_origin(event.position, viewport, size);
         info!(?origin, cursor = ?event.position, ?viewport, "Positioned layer-shell picker");
-        self.picker_origin = Some(origin);
+        self.picker_placement = PickerPlacement::Placed(origin);
         self.set_picker_input_region(window, size);
         cx.notify();
     }
@@ -986,14 +1035,24 @@ impl BrowserApp {
             return self.render_picker_panel(window, cx).into_any_element();
         }
 
-        let origin = self.picker_origin;
+        let placement = self.picker_placement;
         let overlay = gpui::div()
             .relative()
             .size_full()
             .on_mouse_move(cx.listener(Self::handle_overlay_pointer_move));
 
-        if let Some(origin) = origin {
-            overlay
+        match placement {
+            PickerPlacement::Waiting => overlay
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(
+                    gpui::div()
+                        .opacity(0.0)
+                        .child(self.render_picker_panel(window, cx)),
+                )
+                .into_any_element(),
+            PickerPlacement::Placed(origin) => overlay
                 .child(
                     gpui::div()
                         .absolute()
@@ -1001,14 +1060,7 @@ impl BrowserApp {
                         .top(origin.y)
                         .child(self.render_picker_panel(window, cx)),
                 )
-                .into_any_element()
-        } else {
-            overlay
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(self.render_picker_panel(window, cx))
-                .into_any_element()
+                .into_any_element(),
         }
     }
 
@@ -1846,6 +1898,27 @@ fn picker_origin(
             px(0.0)
         } else {
             clamp_pixels(y, margin, max_y)
+        },
+    )
+}
+
+fn centered_picker_origin(viewport: Size<Pixels>, picker: Size<Pixels>) -> Point<Pixels> {
+    let margin = px(PICKER_SCREEN_MARGIN);
+    let max_x = viewport.width - picker.width - margin;
+    let max_y = viewport.height - picker.height - margin;
+    let centered_x = px((f32::from(viewport.width) - f32::from(picker.width)) / 2.0);
+    let centered_y = px((f32::from(viewport.height) - f32::from(picker.height)) / 2.0);
+
+    gpui::point(
+        if max_x < margin {
+            px(0.0)
+        } else {
+            clamp_pixels(centered_x, margin, max_x)
+        },
+        if max_y < margin {
+            px(0.0)
+        } else {
+            clamp_pixels(centered_y, margin, max_y)
         },
     )
 }
