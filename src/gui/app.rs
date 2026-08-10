@@ -875,7 +875,7 @@ impl BrowserApp {
                             .cursor_pointer()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .overflow_hidden()
+                            .truncate()
                             .child(self.state.url.clone())
                             .on_click(cx.listener(|this, _, _, cx| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(
