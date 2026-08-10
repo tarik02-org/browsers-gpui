@@ -3,12 +3,18 @@
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
-  outputs = { self, nixpkgs }:
+  outputs =
+    { self, nixpkgs }:
     let
-      systems = [ "x86_64-linux" "aarch64-linux" ];
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
-    in {
-      packages = forAllSystems (system:
+    in
+    {
+      packages = forAllSystems (
+        system:
         let
           pkgs = import nixpkgs { inherit system; };
           lib = pkgs.lib;
@@ -21,7 +27,8 @@
             vulkan-loader
             wayland
           ];
-        in {
+        in
+        {
           default = pkgs.rustPlatform.buildRustPackage {
             pname = "browsers-gpui";
             version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
@@ -38,6 +45,7 @@
             nativeBuildInputs = with pkgs; [
               clang
               cmake
+              makeWrapper
               pkg-config
             ];
 
@@ -69,18 +77,27 @@
               substituteInPlace "$out/share/applications/software.Browsers.desktop" \
                 --replace-fail '€ExecCommand€' "$out/bin/browsers %u"
 
+              # GPUI loads Wayland and Vulkan at runtime rather than linking
+              # them directly, so their store paths must remain discoverable.
+              wrapProgram "$out/bin/browsers" \
+                --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath runtimeLibraries}"
+
               runHook postInstall
             '';
 
             meta = {
               homepage = "https://browsers.software/";
               description = "Open the right browser at the right time";
-              license = with lib.licenses; [ mit asl20 ];
+              license = with lib.licenses; [
+                mit
+                asl20
+              ];
               mainProgram = "browsers";
               platforms = lib.platforms.linux;
             };
           };
-        });
+        }
+      );
 
       apps = forAllSystems (system: {
         default = {
@@ -96,7 +113,8 @@
         browsers-gpui = self.packages.${final.system}.default;
       };
 
-      devShells = forAllSystems (system:
+      devShells = forAllSystems (
+        system:
         let
           pkgs = import nixpkgs { inherit system; };
           runtimeLibraries = with pkgs; [
@@ -108,7 +126,8 @@
             vulkan-loader
             wayland
           ];
-        in {
+        in
+        {
           default = pkgs.mkShell {
             packages = with pkgs; [
               cargo
@@ -123,6 +142,7 @@
             buildInputs = runtimeLibraries;
             LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeLibraries;
           };
-        });
+        }
+      );
     };
 }
