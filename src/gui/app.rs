@@ -1,5 +1,7 @@
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
@@ -7,12 +9,12 @@ use std::time::Duration;
 
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AnyWindowHandle, App, AppContext, Application, AssetSource, Bounds, ClipboardItem, Context,
-    DismissEvent, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent,
-    ModifiersChangedEvent, MouseButton, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Task, TitlebarOptions, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowDecorations, WindowKind, WindowOptions, img,
-    px, size,
+    AnyWindowHandle, App, AppContext, AssetSource, Bounds, ClipboardItem, Context, DismissEvent,
+    Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent,
+    ModifiersChangedEvent, MouseButton, MouseMoveEvent, ParentElement, Pixels, Point, Render,
+    SharedString, Size, StatefulInteractiveElement, Styled, Subscription, Task, TitlebarOptions,
+    Window, WindowBackgroundAppearance, WindowBounds, WindowDecorations, WindowKind, WindowOptions,
+    img, px, size,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputState};
@@ -38,6 +40,8 @@ const PICKER_ROW_HEIGHT: f32 = 36.0;
 const PICKER_CHROME_HEIGHT: f32 = 38.0;
 const PICKER_MENU_EXTRA_WIDTH: f32 = 220.0;
 const PICKER_MENU_EXTRA_HEIGHT: f32 = 220.0;
+const PICKER_CURSOR_OFFSET: f32 = 8.0;
+const PICKER_SCREEN_MARGIN: f32 = 8.0;
 const TRASH_ICON_PATH: &str = "icons/trash-2.svg";
 const TRASH_ICON: &[u8] = include_bytes!("../../resources/icons/trash-2.svg");
 const SETTINGS_WIDTH: f32 = 680.0;
@@ -155,6 +159,8 @@ pub struct BrowserApp {
     settings_window: Option<AnyWindowHandle>,
     about_window: Option<AnyWindowHandle>,
     context_menu_expanded: bool,
+    picker_origin: Option<Point<Pixels>>,
+    is_layer_shell: bool,
     is_auxiliary: bool,
     _event_task: Option<Task<()>>,
     _activation_subscription: Option<Subscription>,
@@ -166,6 +172,7 @@ impl BrowserApp {
         main_sender: Sender<MessageToMain>,
         ui_receiver: Receiver<MessageToUi>,
         unwrap_urls: Arc<AtomicBool>,
+        is_layer_shell: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -175,7 +182,7 @@ impl BrowserApp {
         let auxiliary_windows = Arc::new(AtomicUsize::new(0));
 
         let focus_handle = cx.focus_handle();
-        focus_handle.focus(window);
+        focus_handle.focus(window, cx);
 
         let activation_subscription = cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
@@ -220,6 +227,8 @@ impl BrowserApp {
             settings_window: None,
             about_window: None,
             context_menu_expanded: false,
+            picker_origin: None,
+            is_layer_shell,
             is_auxiliary: false,
             _event_task: Some(event_task),
             _activation_subscription: Some(activation_subscription),
@@ -238,7 +247,7 @@ impl BrowserApp {
     ) -> Self {
         apply_theme(state.ui_settings.visual_settings.theme, Some(window), cx);
         let focus_handle = cx.focus_handle();
-        focus_handle.focus(window);
+        focus_handle.focus(window, cx);
         let rule_editors = if screen == Screen::Settings {
             state
                 .ui_settings
@@ -268,6 +277,8 @@ impl BrowserApp {
             settings_window: None,
             about_window: None,
             context_menu_expanded: false,
+            picker_origin: None,
+            is_layer_shell: false,
             is_auxiliary: true,
             _event_task: None,
             _activation_subscription: None,
@@ -312,7 +323,7 @@ impl BrowserApp {
                     self.state.set_url(url.clone());
                     self.resize_picker(window);
                     window.activate_window();
-                    self.focus_handle.focus(window);
+                    self.focus_handle.focus(window, cx);
                     self.main_sender
                         .send(MessageToMain::LinkOpenedFromBundle(source_bundle_id, url))
                         .ok();
@@ -355,11 +366,41 @@ impl BrowserApp {
     }
 
     fn resize_picker(&self, window: &mut Window) {
-        window.resize(self.current_picker_size());
+        let size = self.current_picker_size();
+        if self.is_layer_shell {
+            self.set_picker_input_region(window, size);
+        } else {
+            window.resize(size);
+        }
     }
 
     fn current_picker_size(&self) -> gpui::Size<gpui::Pixels> {
         picker_size(&self.state)
+    }
+
+    fn set_picker_input_region(&self, window: &Window, size: Size<Pixels>) {
+        if let Some(origin) = self.picker_origin {
+            window.set_input_region(Some(&[Bounds::new(origin, size)]));
+        }
+    }
+
+    fn handle_overlay_pointer_move(
+        &mut self,
+        event: &MouseMoveEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.is_layer_shell || self.picker_origin.is_some() {
+            return;
+        }
+
+        let size = self.current_picker_size();
+        let viewport = window.viewport_size();
+        let origin = picker_origin(event.position, viewport, size);
+        info!(?origin, cursor = ?event.position, ?viewport, "Positioned layer-shell picker");
+        self.picker_origin = Some(origin);
+        self.set_picker_input_region(window, size);
+        cx.notify();
     }
 
     fn expand_for_context_menu(&mut self) -> gpui::Size<gpui::Pixels> {
@@ -374,8 +415,12 @@ impl BrowserApp {
     fn collapse_context_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.context_menu_expanded {
             self.context_menu_expanded = false;
-            window.resize(self.current_picker_size());
-            self.focus_handle.focus(window);
+            if self.is_layer_shell {
+                self.set_picker_input_region(window, self.current_picker_size());
+            } else {
+                window.resize(self.current_picker_size());
+            }
+            self.focus_handle.focus(window, cx);
             cx.notify();
         }
     }
@@ -433,7 +478,12 @@ impl BrowserApp {
                 cx.new(|cx| Root::new(view, window, cx))
             },
         ) {
-            Ok(handle) => self.settings_window = Some(handle.into()),
+            Ok(handle) => {
+                self.settings_window = Some(handle.into());
+                if self.is_layer_shell {
+                    window.remove_window();
+                }
+            }
             Err(error) => {
                 self.auxiliary_windows.fetch_sub(1, Ordering::Relaxed);
                 warn!("Could not open settings window: {error}");
@@ -496,7 +546,12 @@ impl BrowserApp {
                 cx.new(|cx| Root::new(view, window, cx))
             },
         ) {
-            Ok(handle) => self.about_window = Some(handle.into()),
+            Ok(handle) => {
+                self.about_window = Some(handle.into());
+                if self.is_layer_shell {
+                    window.remove_window();
+                }
+            }
             Err(error) => {
                 self.auxiliary_windows.fetch_sub(1, Ordering::Relaxed);
                 warn!("Could not open About window: {error}");
@@ -636,7 +691,11 @@ impl BrowserApp {
         }
     }
 
-    fn render_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_picker_panel(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let weak = cx.weak_entity();
         let picker_size = self.current_picker_size();
         window.set_rem_size(cx.theme().font_size);
@@ -745,12 +804,18 @@ impl BrowserApp {
                     .on_mouse_down(MouseButton::Right, move |_, window, cx| {
                         let expand_weak = expand_weak.clone();
                         window.defer(cx, move |window, cx| {
-                            if let Ok(size) = expand_weak.update(cx, |this, cx| {
-                                let size = this.expand_for_context_menu();
-                                cx.notify();
-                                size
-                            }) {
-                                window.resize(size);
+                            if let Ok((size, is_layer_shell)) =
+                                expand_weak.update(cx, |this, cx| {
+                                    let size = this.expand_for_context_menu();
+                                    cx.notify();
+                                    (size, this.is_layer_shell)
+                                })
+                            {
+                                if is_layer_shell {
+                                    window.set_input_region(None);
+                                } else {
+                                    window.resize(size);
+                                }
                             }
                         });
                     })
@@ -778,13 +843,42 @@ impl BrowserApp {
             .collect::<Vec<_>>();
 
         let option_weak = weak.clone();
+        let option_expand_weak = weak.clone();
         let show_default = self.state.show_set_as_default;
         let hidden = self.state.restorable_app_profiles.clone();
         let options = Button::new("options")
             .label("•••")
             .ghost()
             .compact()
-            .dropdown_menu(move |mut menu, _, _| {
+            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                let option_expand_weak = option_expand_weak.clone();
+                window.defer(cx, move |window, cx| {
+                    if let Ok(is_layer_shell) = option_expand_weak.update(cx, |this, _| {
+                        this.context_menu_expanded = true;
+                        this.is_layer_shell
+                    }) && is_layer_shell
+                    {
+                        window.set_input_region(None);
+                    }
+                });
+            })
+            .dropdown_menu(move |mut menu, window, cx| {
+                let dismiss_weak = option_weak.clone();
+                let window_handle = window.window_handle();
+                cx.subscribe_self(move |_, _: &DismissEvent, cx| {
+                    let dismiss_weak = dismiss_weak.clone();
+                    cx.defer(move |cx| {
+                        window_handle
+                            .update(cx, |_, window, cx| {
+                                dismiss_weak
+                                    .update(cx, |this, cx| this.collapse_context_menu(window, cx))
+                                    .ok();
+                            })
+                            .ok();
+                    });
+                })
+                .detach();
+
                 let refresh_weak = option_weak.clone();
                 menu = menu.item(PopupMenuItem::new("Refresh applications").on_click(
                     move |_, _, cx| {
@@ -885,6 +979,37 @@ impl BrowserApp {
                     )
                     .child(options),
             )
+    }
+
+    fn render_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+        if !self.is_layer_shell {
+            return self.render_picker_panel(window, cx).into_any_element();
+        }
+
+        let origin = self.picker_origin;
+        let overlay = gpui::div()
+            .relative()
+            .size_full()
+            .on_mouse_move(cx.listener(Self::handle_overlay_pointer_move));
+
+        if let Some(origin) = origin {
+            overlay
+                .child(
+                    gpui::div()
+                        .absolute()
+                        .left(origin.x)
+                        .top(origin.y)
+                        .child(self.render_picker_panel(window, cx)),
+                )
+                .into_any_element()
+        } else {
+            overlay
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(self.render_picker_panel(window, cx))
+                .into_any_element()
+        }
     }
 
     fn render_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -1682,6 +1807,134 @@ fn picker_size(state: &UIState) -> gpui::Size<gpui::Pixels> {
     )
 }
 
+fn clamp_pixels(value: Pixels, minimum: Pixels, maximum: Pixels) -> Pixels {
+    if value < minimum {
+        minimum
+    } else if value > maximum {
+        maximum
+    } else {
+        value
+    }
+}
+
+fn picker_origin(
+    pointer: Point<Pixels>,
+    viewport: Size<Pixels>,
+    picker: Size<Pixels>,
+) -> Point<Pixels> {
+    let margin = px(PICKER_SCREEN_MARGIN);
+    let offset = px(PICKER_CURSOR_OFFSET);
+    let max_x = viewport.width - picker.width - margin;
+    let max_y = viewport.height - picker.height - margin;
+
+    let mut x = pointer.x + offset;
+    if x + picker.width > viewport.width - margin {
+        x = pointer.x - picker.width - offset;
+    }
+    let mut y = pointer.y + offset;
+    if y + picker.height > viewport.height - margin {
+        y = pointer.y - picker.height - offset;
+    }
+
+    gpui::point(
+        if max_x < margin {
+            px(0.0)
+        } else {
+            clamp_pixels(x, margin, max_x)
+        },
+        if max_y < margin {
+            px(0.0)
+        } else {
+            clamp_pixels(y, margin, max_y)
+        },
+    )
+}
+
+fn should_use_layer_shell() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        gpui::guess_compositor() == "Wayland"
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
+fn picker_window_options(state: &UIState, use_layer_shell: bool, cx: &App) -> WindowOptions {
+    let bounds = Bounds::centered(None, picker_size(state), cx);
+    let mut options = WindowOptions {
+        window_bounds: Some(WindowBounds::Windowed(bounds)),
+        titlebar: None,
+        window_background: WindowBackgroundAppearance::Transparent,
+        kind: WindowKind::PopUp,
+        is_movable: true,
+        is_resizable: false,
+        is_minimizable: false,
+        app_id: Some("software.Browsers".to_string()),
+        window_min_size: Some(size(px(PICKER_WIDTH), px(PICKER_CHROME_HEIGHT))),
+        window_decorations: Some(WindowDecorations::Client),
+        ..Default::default()
+    };
+
+    #[cfg(target_os = "linux")]
+    if use_layer_shell {
+        use gpui::layer_shell::{Anchor, KeyboardInteractivity, Layer, LayerShellOptions};
+
+        // Zero size with opposite anchors lets the compositor size the surface to its output.
+        options.window_bounds = Some(WindowBounds::Windowed(Bounds::new(
+            Point::default(),
+            Size::default(),
+        )));
+        options.kind = WindowKind::LayerShell(LayerShellOptions {
+            namespace: "software.Browsers.picker".to_string(),
+            layer: Layer::Overlay,
+            anchor: Anchor::TOP | Anchor::RIGHT | Anchor::BOTTOM | Anchor::LEFT,
+            exclusive_zone: Some(px(-1.0)),
+            keyboard_interactivity: KeyboardInteractivity::Exclusive,
+            ..Default::default()
+        });
+        options.is_movable = false;
+        options.window_min_size = None;
+        options.window_decorations = None;
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    let _ = use_layer_shell;
+
+    options
+}
+
+fn open_picker_window(
+    cx: &mut App,
+    state: UIState,
+    main_sender: Sender<MessageToMain>,
+    ui_receiver: Rc<RefCell<Option<Receiver<MessageToUi>>>>,
+    unwrap_urls: Arc<AtomicBool>,
+    use_layer_shell: bool,
+) -> anyhow::Result<()> {
+    let options = picker_window_options(&state, use_layer_shell, cx);
+    cx.open_window(options, move |window, cx| {
+        let ui_receiver = ui_receiver
+            .borrow_mut()
+            .take()
+            .expect("picker UI receiver was already consumed");
+        cx.new(|cx| {
+            BrowserApp::new(
+                state,
+                main_sender,
+                ui_receiver,
+                unwrap_urls,
+                use_layer_shell,
+                window,
+                cx,
+            )
+        })
+    })?;
+    Ok(())
+}
+
 /// Run the GPUI application on the current thread until its last window closes.
 pub fn run(state: UIState, main_sender: Sender<MessageToMain>, ui_receiver: Receiver<MessageToUi>) {
     let unwrap_urls = Arc::new(AtomicBool::new(
@@ -1690,7 +1943,7 @@ pub fn run(state: UIState, main_sender: Sender<MessageToMain>, ui_receiver: Rece
     let open_url_flag = unwrap_urls.clone();
     let open_url_sender = main_sender.clone();
 
-    let application = Application::new().with_assets(AppAssets {
+    let application = gpui_platform::application().with_assets(AppAssets {
         component_assets: ComponentAssets,
     });
     application.on_open_urls(move |urls| {
@@ -1710,35 +1963,31 @@ pub fn run(state: UIState, main_sender: Sender<MessageToMain>, ui_receiver: Rece
     application.run(move |cx| {
         gpui_component::init(cx);
         apply_theme(state.ui_settings.visual_settings.theme, None, cx);
-        cx.on_window_closed(|cx| {
+        cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
                 cx.quit();
             }
         })
         .detach();
 
-        let bounds = Bounds::centered(None, picker_size(&state), cx);
-        cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::Windowed(bounds)),
-                titlebar: None,
-                window_background: WindowBackgroundAppearance::Transparent,
-                kind: WindowKind::PopUp,
-                is_movable: true,
-                is_resizable: false,
-                is_minimizable: false,
-                app_id: Some("software.Browsers".to_string()),
-                window_min_size: Some(size(px(PICKER_WIDTH), px(PICKER_CHROME_HEIGHT))),
-                window_decorations: Some(WindowDecorations::Client),
-                ..Default::default()
-            },
-            move |window, cx| {
-                cx.new(|cx| {
-                    BrowserApp::new(state, main_sender, ui_receiver, unwrap_urls, window, cx)
-                })
-            },
-        )
-        .expect("could not open Browsers window");
+        let ui_receiver = Rc::new(RefCell::new(Some(ui_receiver)));
+        let use_layer_shell = should_use_layer_shell();
+        let result = open_picker_window(
+            cx,
+            state.clone(),
+            main_sender.clone(),
+            ui_receiver.clone(),
+            unwrap_urls.clone(),
+            use_layer_shell,
+        );
+        if let Err(error) = result {
+            if !use_layer_shell {
+                panic!("could not open Browsers window: {error}");
+            }
+            warn!("Layer-shell picker unavailable, using a normal popup: {error}");
+            open_picker_window(cx, state, main_sender, ui_receiver, unwrap_urls, false)
+                .expect("could not open Browsers fallback window");
+        }
         cx.activate(true);
     });
 }

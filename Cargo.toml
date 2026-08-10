@@ -28,14 +28,18 @@ toml = "1.0.0"
 serde_json = "1.0.145"
 serde = { version = "1.0.228", features = ["derive"] }
 
-# GPU-accelerated UI and component library. These releases are designed to
-# work together; Cargo.lock pins their complete dependency graph.
-gpui = "0.2.2"
-gpui-component = "0.5.1"
-gpui-component-assets = "0.5.1"
+# GPU-accelerated UI and component library. gpui-component's current git
+# revision tracks Zed's unpublished GPUI APIs; Cargo.lock pins Zed to the
+# matching revision used by that component commit. gpui_linux is vendored
+# below with the minimal zero-sized layer-shell fix.
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "e12e39ca55051d02f0e2ae8a910a674905c722d6" }
+gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "e12e39ca55051d02f0e2ae8a910a674905c722d6" }
 
 # Browser/profile icon decoding and cache generation.
 image = { version = "0.24.9", default-features = false, features = ["png", "jpeg"] }
+
 anyhow = "1.0"
 
 # parse urls
@@ -106,6 +110,9 @@ winres = "0.1.12"
 
 # statically link vcruntime140.dll instead of requiring user to install the runtime
 static_vcruntime = "3.0"
+
+[patch."https://github.com/zed-industries/zed"]
+gpui_linux = { path = "vendor/gpui_linux" }
 
 #[profile.dev]
 #lto = true
