@@ -1,3 +1,4 @@
-//! Toolkit-independent desktop interface model.
+//! GPUI desktop interface.
 
+pub mod app;
 pub mod model;

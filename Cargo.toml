@@ -28,8 +28,16 @@ toml = "1.0.0"
 serde_json = "1.0.145"
 serde = { version = "1.0.228", features = ["derive"] }
 
+# GPU-accelerated UI and component library. gpui-component tracks Zed's
+# unpublished GPUI APIs, so Cargo.lock pins both repositories.
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui-component = { git = "https://github.com/longbridge/gpui-component", rev = "e12e39ca55051d02f0e2ae8a910a674905c722d6" }
+gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", rev = "e12e39ca55051d02f0e2ae8a910a674905c722d6" }
+
 # Browser/profile icon decoding and cache generation.
 image = { version = "0.24.9", default-features = false, features = ["png", "jpeg"] }
+anyhow = "1.0"
 
 # parse urls
 url = "2.5.7"
@@ -76,7 +84,14 @@ shell-words = "1.1.0"
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.56.0"
 
-winapi = { version = "0.3.9", features = ["ntdef"] }
+winapi = { version = "0.3.9", features = [
+    "minwindef",
+    "ntdef",
+    "shellapi",
+    "windef",
+    "wingdi",
+    "winuser",
+] }
 
 # Helps parsing commands that are in windows registry for different apps
 # Same as `shell-words` but for Windows, i.e supporting \ in paths
@@ -93,6 +108,10 @@ winres = "0.1.12"
 # statically link vcruntime140.dll instead of requiring user to install the runtime
 static_vcruntime = "3.0"
 
+[patch."https://github.com/zed-industries/zed"]
+gpui = { git = "https://github.com/tarik02/zed", rev = "765f26b4414ed87dad9026cbdc34ad5188b02a15", version = "=0.2.2" }
+gpui_linux = { git = "https://github.com/tarik02/zed", rev = "765f26b4414ed87dad9026cbdc34ad5188b02a15", version = "=0.1.0" }
+
 #[profile.dev]
 #lto = true
 
@@ -107,12 +126,12 @@ lto = true           # Enable Link Time Optimization
 # so update from main to specific version once released https://github.com/cross-rs/cross/pkgs/container/x86_64-unknown-linux-gnu/versions?filters%5Bversion_type%5D=tagged
 # Additionally install some libraries we need
 [package.metadata.cross.target.x86_64-unknown-linux-gnu]
-image = "browsers.software/x86_64-unknown-linux-gnu-gtk:local"
+image = "browsers.software/x86_64-unknown-linux-gnu-gpui:local"
 #image = "ghcr.io/cross-rs/x86_64-unknown-linux-gnu:main"
 
 [package.metadata.cross.target.aarch64-unknown-linux-gnu]
-image = "browsers.software/aarch64-unknown-linux-gnu-gtk:local"
+image = "browsers.software/aarch64-unknown-linux-gnu-gpui:local"
 #image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:main"
 
 [package.metadata.cross.target.armv7-unknown-linux-gnueabihf]
-image = "browsers.software/armv7-unknown-linux-gnueabihf-gtk:local"
+image = "browsers.software/armv7-unknown-linux-gnueabihf-gpui:local"

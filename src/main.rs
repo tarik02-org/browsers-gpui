@@ -3,18 +3,19 @@
 use rolling_file;
 use rolling_file::{BasicRollingFileAppender, RollingConditionBasic};
 use std::str::FromStr;
-use std::{env, fs};
+use std::sync::mpsc;
+use std::{env, fs, thread};
 use tracing::{Level, info};
 use tracing_subscriber;
 use tracing_subscriber::fmt::time::OffsetTime;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 
-use browsers::paths;
 use browsers::utils::OSAppFinder;
 use browsers::{
-    UrlOpenContext, generate_all_browser_profiles, get_opening_rules, open_link_if_matching_rule,
-    prepare_ui, unwrap_url, utils,
+    MessageToMain, UrlOpenContext, generate_all_browser_profiles, get_opening_rules,
+    open_link_if_matching_rule, prepare_ui, unwrap_url, utils,
 };
+use browsers::{handle_messages_to_main, paths};
 
 fn main() {
     let offset_time = OffsetTime::local_rfc_3339().expect("could not get local offset!");
@@ -65,11 +66,13 @@ fn main() {
     let show_gui = !args.contains(&"--no-gui".to_string());
     let force_reload = args.contains(&"--reload".to_string());
 
+    let (main_sender, main_receiver) = mpsc::channel::<MessageToMain>();
+
     let app_finder = OSAppFinder::new();
     let config = app_finder.load_config();
-    let opening_rules_and_default_profile = get_opening_rules(&config);
+    let mut opening_rules_and_default_profile = get_opening_rules(&config);
 
-    let visible_and_hidden_profiles =
+    let mut visible_and_hidden_profiles =
         generate_all_browser_profiles(&config, &app_finder, force_reload);
 
     let behavioral_settings = config.get_behavior();
@@ -110,5 +113,17 @@ fn main() {
         return;
     }
 
-    eprintln!("Browsers was built without a desktop UI");
+    let (ui_sender, ui_receiver) = mpsc::channel();
+
+    thread::spawn(move || {
+        handle_messages_to_main(
+            main_receiver,
+            ui_sender,
+            &mut opening_rules_and_default_profile,
+            &mut visible_and_hidden_profiles,
+            &app_finder,
+        );
+    });
+
+    browsers::gui::app::run(ui_state, main_sender, ui_receiver);
 }

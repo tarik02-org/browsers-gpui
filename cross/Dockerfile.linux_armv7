@@ -9,6 +9,14 @@ RUN dpkg --add-architecture armhf && \
       -y \
       --no-install-recommends \
       install \
-        libpango-1.0-0:armhf \
-        libpango1.0-dev:armhf \
-        libgtk-3-dev:armhf
+        clang \
+        cmake \
+        pkg-config \
+        libfontconfig1-dev:armhf \
+        libfreetype6-dev:armhf \
+        libwayland-dev:armhf \
+        libx11-dev:armhf \
+        libxcb1-dev:armhf \
+        libxkbcommon-dev:armhf \
+        libxkbcommon-x11-dev:armhf \
+        libvulkan-dev:armhf

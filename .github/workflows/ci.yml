@@ -26,7 +26,7 @@ jobs:
           builder: ${{ steps.buildx.outputs.name }}
           file: cross/Dockerfile.linux_x86_64
           push: false
-          tags: browsers.software/x86_64-unknown-linux-gnu-gtk:local
+          tags: browsers.software/x86_64-unknown-linux-gnu-gpui:local
           cache-from: type=gha,scope=x86_64
           cache-to: type=gha,scope=x86_64,mode=max
           load: true # load the created image into docker, so cross can find it
@@ -37,7 +37,7 @@ jobs:
           builder: ${{ steps.buildx.outputs.name }}
           file: cross/Dockerfile.linux_aarch64
           push: false
-          tags: browsers.software/aarch64-unknown-linux-gnu-gtk:local
+          tags: browsers.software/aarch64-unknown-linux-gnu-gpui:local
           cache-from: type=gha,scope=aarch64
           cache-to: type=gha,scope=aarch64,mode=max
           load: true # load the created image into docker, so cross can find it
@@ -48,7 +48,7 @@ jobs:
           builder: ${{ steps.buildx.outputs.name }}
           file: cross/Dockerfile.linux_armv7
           push: false
-          tags: browsers.software/armv7-unknown-linux-gnueabihf-gtk:local
+          tags: browsers.software/armv7-unknown-linux-gnueabihf-gpui:local
           cache-from: type=gha,scope=armv7
           cache-to: type=gha,scope=armv7,mode=max
           load: true # load the created image into docker, so cross can find it
