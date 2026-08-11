@@ -84,6 +84,11 @@
               substituteInPlace "$out/share/applications/software.Browsers.desktop" \
                 --replace-fail '€ExecCommand€' "$out/bin/browsers %u"
 
+              install -Dm644 extra/linux/dist/software.Browsers.service \
+                "$out/share/dbus-1/services/software.Browsers.service"
+              substituteInPlace "$out/share/dbus-1/services/software.Browsers.service" \
+                --replace-fail '€ExecCommand€' "$out/bin/browsers"
+
               # GPUI loads Wayland and Vulkan at runtime rather than linking
               # them directly, so their store paths must remain discoverable.
               wrapProgram "$out/bin/browsers" \

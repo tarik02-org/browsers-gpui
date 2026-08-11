@@ -1,214 +1,124 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read};
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::HashMap;
 use std::sync::mpsc::Sender;
-use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
+use tracing::info;
+use zbus::interface;
+use zbus::zvariant::{OwnedValue, Str};
 
-use crate::{MessageToMain, paths};
+use crate::MessageToMain;
 
-const SOCKET_FILE: &str = "daemon.sock";
-const MAX_REQUEST_BYTES: u64 = 64 * 1024;
-const IO_TIMEOUT: Duration = Duration::from_secs(1);
-const START_TIMEOUT: Duration = Duration::from_secs(5);
+const APPLICATION_NAME: &str = "software.Browsers";
+const APPLICATION_PATH: &str = "/software/Browsers";
+const APPLICATION_INTERFACE: &str = "org.freedesktop.Application";
+const ACTIVATION_TIMEOUT: Duration = Duration::from_secs(5);
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug)]
 pub struct DaemonRequest {
     pub url: String,
     pub reload: bool,
-    #[serde(default)]
     pub activation_token: Option<String>,
 }
 
-pub struct DaemonSocket {
-    path: PathBuf,
-    device: u64,
-    inode: u64,
-    _lock: File,
-    stopping: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
-}
-
-impl Drop for DaemonSocket {
-    fn drop(&mut self) {
-        self.stopping.store(true, Ordering::Release);
-        UnixStream::connect(&self.path).ok();
-        if let Some(thread) = self.thread.take() {
-            thread.join().ok();
-        }
-
-        if let Ok(metadata) = fs::symlink_metadata(&self.path)
-            && metadata.dev() == self.device
-            && metadata.ino() == self.inode
-        {
-            fs::remove_file(&self.path).ok();
-        }
-    }
-}
-
-pub fn start_daemon_listener(
+struct ApplicationService {
     main_sender: Sender<MessageToMain>,
-) -> io::Result<Option<DaemonSocket>> {
-    let runtime_dir = paths::get_runtime_dir();
-    fs::create_dir_all(&runtime_dir)?;
-    fs::set_permissions(&runtime_dir, fs::Permissions::from_mode(0o700))?;
+}
 
-    let path = runtime_dir.join(SOCKET_FILE);
-    let Some(lock) = acquire_lock(&runtime_dir.join("daemon.lock"))? else {
-        return Ok(None);
-    };
-    let listener = bind_listener(&path)?;
-    let metadata = fs::metadata(&path)?;
-    let stopping = Arc::new(AtomicBool::new(false));
-    let thread_stopping = stopping.clone();
+#[interface(name = "org.freedesktop.Application")]
+impl ApplicationService {
+    fn activate(&self, platform_data: HashMap<String, OwnedValue>) -> zbus::fdo::Result<()> {
+        self.send_url(String::new(), activation_token(&platform_data))
+    }
 
-    let thread = thread::spawn(move || {
-        loop {
-            match listener.accept() {
-                Ok(_) if thread_stopping.load(Ordering::Acquire) => break,
-                Ok((stream, _)) => handle_connection(stream, &main_sender),
-                Err(_) if thread_stopping.load(Ordering::Acquire) => break,
-                Err(error) => {
-                    warn!("Could not accept daemon request: {error}");
-                    thread::sleep(Duration::from_millis(25));
-                }
-            }
+    fn open(
+        &self,
+        uris: Vec<String>,
+        platform_data: HashMap<String, OwnedValue>,
+    ) -> zbus::fdo::Result<()> {
+        let activation_token = activation_token(&platform_data);
+        for uri in uris {
+            self.send_url(uri, activation_token.clone())?;
         }
-    });
-
-    info!(socket = %path.display(), "Started Browsers daemon listener");
-    Ok(Some(DaemonSocket {
-        path,
-        device: metadata.dev(),
-        inode: metadata.ino(),
-        _lock: lock,
-        stopping,
-        thread: Some(thread),
-    }))
-}
-
-pub fn forward_or_start(request: &DaemonRequest) -> io::Result<()> {
-    if forward(request).is_ok() {
-        return Ok(());
+        Ok(())
     }
 
-    Command::new(std::env::current_exe()?)
-        .arg("--daemon")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-
-    let deadline = Instant::now() + START_TIMEOUT;
-    let mut last_error = None;
-    while Instant::now() < deadline {
-        match forward(request) {
-            Ok(()) => return Ok(()),
-            Err(error) => last_error = Some(error),
+    fn activate_action(
+        &self,
+        action_name: String,
+        _parameter: Vec<OwnedValue>,
+        _platform_data: HashMap<String, OwnedValue>,
+    ) -> zbus::fdo::Result<()> {
+        if action_name != "reload" {
+            return Err(zbus::fdo::Error::InvalidArgs(format!(
+                "unknown action {action_name}"
+            )));
         }
-        thread::sleep(Duration::from_millis(20));
-    }
 
-    Err(last_error.unwrap_or_else(|| {
-        io::Error::new(io::ErrorKind::TimedOut, "Browsers daemon did not start")
-    }))
+        self.main_sender
+            .send(MessageToMain::Refresh)
+            .map_err(|_| backend_stopped())
+    }
 }
 
-fn socket_path() -> PathBuf {
-    paths::get_runtime_dir().join(SOCKET_FILE)
+impl ApplicationService {
+    fn send_url(&self, url: String, activation_token: Option<String>) -> zbus::fdo::Result<()> {
+        info!("Received D-Bus application request");
+        self.main_sender
+            .send(MessageToMain::UrlOpenRequest(
+                String::new(),
+                url,
+                activation_token,
+            ))
+            .map_err(|_| backend_stopped())
+    }
 }
 
-fn acquire_lock(path: &Path) -> io::Result<Option<File>> {
-    let lock = OpenOptions::new()
-        .create(true)
-        .read(true)
-        .write(true)
-        .open(path)?;
-    let result = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-    if result == 0 {
-        return Ok(Some(lock));
+fn backend_stopped() -> zbus::fdo::Error {
+    zbus::fdo::Error::Failed("Browsers backend stopped".to_string())
+}
+
+fn activation_token(platform_data: &HashMap<String, OwnedValue>) -> Option<String> {
+    platform_data
+        .get("activation-token")
+        .and_then(|value| <&str>::try_from(value).ok())
+        .map(str::to_owned)
+}
+
+pub fn start_application_service(
+    main_sender: Sender<MessageToMain>,
+) -> zbus::Result<zbus::blocking::Connection> {
+    zbus::blocking::connection::Builder::session()?
+        .name(APPLICATION_NAME)?
+        .serve_at(APPLICATION_PATH, ApplicationService { main_sender })?
+        .build()
+}
+
+pub fn activate(request: &DaemonRequest) -> zbus::Result<()> {
+    let connection = zbus::blocking::connection::Builder::session()?
+        .method_timeout(ACTIVATION_TIMEOUT)
+        .build()?;
+    let proxy = zbus::blocking::Proxy::new(
+        &connection,
+        APPLICATION_NAME,
+        APPLICATION_PATH,
+        APPLICATION_INTERFACE,
+    )?;
+    let platform_data = request
+        .activation_token
+        .as_deref()
+        .map(|token| HashMap::from([("activation-token", OwnedValue::from(Str::from(token)))]))
+        .unwrap_or_default();
+
+    if request.reload {
+        proxy.call::<_, _, ()>(
+            "ActivateAction",
+            &("reload", Vec::<OwnedValue>::new(), &platform_data),
+        )?;
     }
 
-    let error = io::Error::last_os_error();
-    if error.kind() == io::ErrorKind::WouldBlock {
-        Ok(None)
+    if request.url.is_empty() {
+        proxy.call::<_, _, ()>("Activate", &platform_data)
     } else {
-        Err(error)
+        proxy.call::<_, _, ()>("Open", &(vec![request.url.as_str()], platform_data))
     }
-}
-
-fn bind_listener(path: &Path) -> io::Result<UnixListener> {
-    match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_socket() => fs::remove_file(path)?,
-        Ok(_) => {
-            return Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                format!("refusing to replace non-socket path {}", path.display()),
-            ));
-        }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
-    }
-
-    UnixListener::bind(path)
-}
-
-fn handle_connection(mut stream: UnixStream, main_sender: &Sender<MessageToMain>) {
-    stream.set_read_timeout(Some(IO_TIMEOUT)).ok();
-    stream.set_write_timeout(Some(IO_TIMEOUT)).ok();
-
-    let mut payload = Vec::new();
-    if let Err(error) = Read::by_ref(&mut stream)
-        .take(MAX_REQUEST_BYTES + 1)
-        .read_to_end(&mut payload)
-    {
-        warn!("Could not read daemon request: {error}");
-        return;
-    }
-    if payload.len() as u64 > MAX_REQUEST_BYTES {
-        warn!("Rejected oversized daemon request");
-        return;
-    }
-
-    let request: DaemonRequest = match serde_json::from_slice(&payload) {
-        Ok(request) => request,
-        Err(error) => {
-            warn!("Rejected invalid daemon request: {error}");
-            return;
-        }
-    };
-    info!("Received daemon request");
-
-    if request.reload && main_sender.send(MessageToMain::Refresh).is_err() {
-        warn!("Browsers backend stopped while handling a daemon request");
-        std::process::exit(1);
-    }
-    if main_sender
-        .send(MessageToMain::UrlOpenRequest(
-            String::new(),
-            request.url,
-            request.activation_token,
-        ))
-        .is_err()
-    {
-        warn!("Browsers backend stopped while handling a daemon request");
-        std::process::exit(1);
-    }
-}
-
-fn forward(request: &DaemonRequest) -> io::Result<()> {
-    let mut stream = UnixStream::connect(socket_path())?;
-    stream.set_write_timeout(Some(IO_TIMEOUT))?;
-    serde_json::to_writer(&mut stream, request)?;
-    stream.shutdown(std::net::Shutdown::Write).ok();
-    Ok(())
 }

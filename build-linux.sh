@@ -50,6 +50,9 @@ build_app_bundle() {
   mkdir -p "$target_dir/template/share/applications/"
   cp "extra/linux/dist/software.Browsers.template.desktop" "$target_dir/template/share/applications/software.Browsers.template.desktop"
 
+  mkdir -p "$target_dir/template/share/dbus-1/services/"
+  cp "extra/linux/dist/software.Browsers.service" "$target_dir/template/share/dbus-1/services/software.Browsers.service"
+
   mkdir -p "$target_dir/template/share/xfce4/"
   mkdir -p "$target_dir/template/share/xfce4/helpers/"
   cp "extra/linux/dist/xfce4/helpers/software.Browsers.template.desktop" "$target_dir/template/share/xfce4/helpers/software.Browsers.template.desktop"
@@ -77,6 +80,7 @@ make_archives() {
     './resources/icons/512x512/software.Browsers.png'
     './resources/repository/application-repository.toml'
     './template/share/applications/software.Browsers.template.desktop'
+    './template/share/dbus-1/services/software.Browsers.service'
     './template/share/xfce4/helpers/software.Browsers.template.desktop'
     './install.sh'
     './uninstall.sh'

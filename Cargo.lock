@@ -838,6 +838,7 @@ dependencies = [
  "winres",
  "winsplit",
  "xdg-mime",
+ "zbus",
 ]
 
 [[package]]

@@ -29,10 +29,7 @@ fn main() {
         .unwrap_or_default();
 
     #[cfg(target_os = "linux")]
-    let wayland_available = gpui::guess_compositor() == "Wayland";
-
-    #[cfg(target_os = "linux")]
-    if !is_daemon && !no_gui && wayland_available {
+    if !is_daemon && !no_gui {
         let request = browsers::communicate::DaemonRequest {
             url: requested_url.clone(),
             reload: force_reload,
@@ -40,29 +37,23 @@ fn main() {
                 .ok()
                 .filter(|token| !token.is_empty()),
         };
-        match browsers::communicate::forward_or_start(&request) {
+        match browsers::communicate::activate(&request) {
             Ok(()) => return,
             Err(error) => {
-                eprintln!("Could not reach Browsers daemon, opening directly: {error}");
+                eprintln!("Could not activate Browsers over D-Bus, opening directly: {error}");
             }
         }
     }
 
-    #[cfg(target_os = "linux")]
-    if is_daemon && !wayland_available {
-        eprintln!("Browsers daemon requires a Wayland session");
-        return;
-    }
-
     #[cfg(not(target_os = "linux"))]
     if is_daemon {
-        eprintln!("Browsers daemon is currently supported only on Linux Wayland");
+        eprintln!("Browsers daemon is currently supported only on Linux");
         return;
     }
 
     if is_daemon {
         // The long-running daemon must not consume the activation token intended for a picker.
-        // Each short-lived client forwards its current token over the socket.
+        // Each short-lived client forwards its current token over D-Bus.
         // SAFETY: No worker threads have started yet.
         unsafe { env::remove_var("XDG_ACTIVATION_TOKEN") };
     }
@@ -113,10 +104,10 @@ fn main() {
     let (main_sender, main_receiver) = mpsc::channel::<MessageToMain>();
 
     #[cfg(target_os = "linux")]
-    let _daemon_socket = if is_daemon {
-        match browsers::communicate::start_daemon_listener(main_sender.clone()) {
-            Ok(Some(socket)) => Some(socket),
-            Ok(None) => {
+    let _application_service = if is_daemon {
+        match browsers::communicate::start_application_service(main_sender.clone()) {
+            Ok(connection) => Some(connection),
+            Err(zbus::Error::NameTaken) => {
                 info!("Browsers daemon is already running");
                 return;
             }

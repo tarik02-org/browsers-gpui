@@ -74,8 +74,8 @@ objc2 = "0.6.1"
 libc = "0.2.154"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-libc = "0.2"
 xdg-mime = "^0.4.0"
+zbus = "5.19.0"
 
 # to find application .desktop files
 freedesktop-desktop-entry = "0.8.0"

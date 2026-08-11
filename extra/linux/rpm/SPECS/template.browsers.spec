@@ -58,6 +58,8 @@ mkdir -p %{buildroot}%{_datadir}/icons/hicolor/16x16/apps
 
 cp -a %{_tree}%{_datadir}/applications/software.Browsers.desktop %{buildroot}%{_datadir}/applications/software.Browsers.desktop
 cp -a %{_tree}%{_datadir}/applications/xfce4/helpers/software.Browsers.desktop %{buildroot}%{_datadir}/applications/xfce4/helpers/software.Browsers.desktop
+mkdir -p %{buildroot}%{_datadir}/dbus-1/services
+cp -a %{_tree}%{_datadir}/dbus-1/services/software.Browsers.service %{buildroot}%{_datadir}/dbus-1/services/software.Browsers.service
 
 for size in 16 32 64 128 256 512; do
     cp -a %{_tree}%{_datadir}/icons/hicolor/${size}x${size}/apps/software.Browsers.png %{buildroot}%{_datadir}/icons/hicolor/${size}x${size}/apps/software.Browsers.png
@@ -80,6 +82,7 @@ cp -a %{_tree}%{_bindir}/browsers %{buildroot}%{_bindir}/browsers
 %{_bindir}/browsers
 %{_datadir}/applications/software.Browsers.desktop
 %{_datadir}/applications/xfce4/helpers/software.Browsers.desktop
+%{_datadir}/dbus-1/services/software.Browsers.service
 %{_datadir}/icons/hicolor/*/apps/software.Browsers.png
 %{_datadir}/software.Browsers/bin/browsers
 %{_datadir}/software.Browsers/resources/i18n/en-US/builtin.ftl
