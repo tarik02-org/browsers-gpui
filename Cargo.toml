@@ -76,7 +76,14 @@ shell-words = "1.1.0"
 [target.'cfg(target_os = "windows")'.dependencies]
 winreg = "0.56.0"
 
-winapi = { version = "0.3.9", features = ["ntdef"] }
+winapi = { version = "0.3.9", features = [
+    "minwindef",
+    "ntdef",
+    "shellapi",
+    "windef",
+    "wingdi",
+    "winuser",
+] }
 
 # Helps parsing commands that are in windows registry for different apps
 # Same as `shell-words` but for Windows, i.e supporting \ in paths
