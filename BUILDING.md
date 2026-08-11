@@ -7,19 +7,45 @@
 
 # Build Linux binary
 
+## Nix / NixOS
+
+The repository includes a development shell with the Rust toolchain and all
+GPUI native dependencies:
+
+    nix develop
+    cargo build --release
+
+The flake also provides a self-contained Linux package (including the
+application repository, translations, desktop entry, and icons):
+
+    nix build
+    nix run
+
+To install it into a Nix profile, use `nix profile install .`. The package is
+available as `packages.default`; the same derivation can be consumed from
+another flake through `inputs.browsers-gpui.overlays.default` as
+`pkgs.browsers-gpui`.
+
 ## Setup (e.g Ubuntu)
 
-    sudo apt install build-essential
-    sudo apt install libpango-1.0-0 libpango1.0-dev libgtk-3-dev
+    sudo apt install build-essential clang cmake pkg-config
+    sudo apt install libfontconfig1-dev libfreetype-dev libwayland-dev \
+      libx11-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+      libvulkan-dev
 
 ## Setup (e.g Fedora)
 
     sudo dnf groupinstall "Development Tools"
-    sudo dnf install glib2-devel pango-devel cairo-gobject-devel atk-devel gtk3-devel
+    sudo dnf install clang cmake pkgconf-pkg-config fontconfig-devel \
+      freetype-devel wayland-devel libX11-devel libxcb-devel \
+      libxkbcommon-devel vulkan-loader-devel
 
 ## Build Natively
 
     cargo build --release
+
+GPUI uses Vulkan on Linux. A working Vulkan driver is required when running
+the application; both X11 and Wayland backends are enabled by default.
 
 ## Or build via docker image
 

@@ -121,6 +121,13 @@ fi
 SRC_DESKTOP_FILE_PATH="$SRC_DESKTOP_FILE_DIR/software.Browsers.desktop"
 
 if [ "$IS_LOCAL_INSTALL" = true ]; then
+  SRC_DBUS_SERVICE_DIR="$THIS_DIR/share/user/dbus-1/services"
+else
+  SRC_DBUS_SERVICE_DIR="$THIS_DIR/share/system/dbus-1/services"
+fi
+SRC_DBUS_SERVICE_PATH="$SRC_DBUS_SERVICE_DIR/software.Browsers.service"
+
+if [ "$IS_LOCAL_INSTALL" = true ]; then
   SRC_XFCE4_DESKTOP_FILE_DIR="$THIS_DIR/share/user/xfce4/helpers"
 else
   SRC_XFCE4_DESKTOP_FILE_DIR="$THIS_DIR/share/system/xfce4/helpers"
@@ -136,6 +143,17 @@ prepare_desktop_file() {
 
   create_dir_if_not_exists "$SRC_DESKTOP_FILE_DIR" true
   sed "s|€ExecCommand€|$TARGET_INSTALL_BINARY_PATH %u|g" "$SRC_TEMPLATE_DESKTOP_FILE_PATH" >"$SRC_DESKTOP_FILE_PATH"
+}
+
+prepare_dbus_service() {
+  SRC_TEMPLATE_DBUS_SERVICE_PATH="$THIS_DIR/template/share/dbus-1/services/software.Browsers.service"
+  if [ ! -f "$SRC_TEMPLATE_DBUS_SERVICE_PATH" ]; then
+    echo "$SRC_TEMPLATE_DBUS_SERVICE_PATH does not exist. Please install manually"
+    exit 1
+  fi
+
+  create_dir_if_not_exists "$SRC_DBUS_SERVICE_DIR" true
+  sed "s|€ExecCommand€|$TARGET_INSTALL_BINARY_PATH|g" "$SRC_TEMPLATE_DBUS_SERVICE_PATH" >"$SRC_DBUS_SERVICE_PATH"
 }
 
 prepare_xfce4_desktop_file() {
@@ -169,6 +187,17 @@ install_desktop_file() {
   desktop-file-install --dir="$TARGET_DESKTOP_DIR_PATH" "$SRC_DESKTOP_FILE_PATH"
 }
 
+install_dbus_service() {
+  if [ "$IS_LOCAL_INSTALL" = true ]; then
+    TARGET_DBUS_SERVICE_DIR="$XDG_DATA_HOME/dbus-1/services"
+  else
+    TARGET_DBUS_SERVICE_DIR="/usr/share/dbus-1/services"
+  fi
+  create_dir_if_not_exists "$TARGET_DBUS_SERVICE_DIR"
+
+  install -m 0644 "$SRC_DBUS_SERVICE_PATH" "$TARGET_DBUS_SERVICE_DIR/software.Browsers.service"
+}
+
 install_xfce4_desktop_file() {
   if [ "$IS_LOCAL_INSTALL" = true ]; then
     # ~/.local/share/xfce4/helpers
@@ -199,11 +228,13 @@ install_icons() {
 }
 
 prepare_desktop_file
+prepare_dbus_service
 prepare_xfce4_desktop_file
 install_binary
 install_icons
 install_xfce4_desktop_file
 install_desktop_file
+install_dbus_service
 
 if [[ $* != *--skip-desktop-database* ]]; then
   # The update-desktop-database program is a tool to build a cache database of the MIME types handled by desktop files.

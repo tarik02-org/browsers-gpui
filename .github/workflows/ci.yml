@@ -85,6 +85,7 @@ jobs:
         run: |
           CROSS_BUILD_OPTS="--builder ${{ steps.buildx.outputs.name }} --cache-from type=gha,scope=armv7 --cache-to type=gha,scope=armv7,mode=max" cross build --target armv7-unknown-linux-gnueabihf --release
       - name: Build binaries and package
+        if: github.ref == 'refs/heads/main'
         env:
           APPCAST_SECRET_KEY_BASE64: ${{ secrets.APPCAST_SECRET_KEY_BASE64 }}
         run: |
@@ -94,6 +95,7 @@ jobs:
           ./build-linux.sh
         shell: bash
       - name: Test installer
+        if: github.ref == 'refs/heads/main'
         run: |
           # desktop-file-utils is required for running install.sh (desktop-file-install and update-desktop-database)
           sudo apt-get install -y --no-install-recommends desktop-file-utils
@@ -103,6 +105,7 @@ jobs:
           ./install.sh
         shell: bash
       - name: End-to-end test - run Browsers
+        if: github.ref == 'refs/heads/main'
         run: |
           install_dir="$HOME/.local/bin"
           cd "$install_dir"
@@ -139,6 +142,7 @@ jobs:
           fi
         shell: bash
       - name: Upload release artifact
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v7
         with:
           name: browsers-linux-artifacts
@@ -202,6 +206,7 @@ jobs:
           mkdir -p target/universal-apple-darwin/release/
           lipo -create -output target/universal-apple-darwin/release/Browsers target/x86_64-apple-darwin/release/browsers target/aarch64-apple-darwin/release/browsers
       - name: Build with signing
+        if: github.ref == 'refs/heads/main'
         env:
           APPLE_DEVELOPER_ID_APP_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APP_P12 }}
           P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APP_P12_PASSWORD }}
@@ -219,6 +224,7 @@ jobs:
           ./build-mac.sh
         shell: bash
       - name: Test app dir
+        if: github.ref == 'refs/heads/main'
         run: |
           target_dir='target/universal-apple-darwin/release'
           cd "$target_dir"
@@ -228,6 +234,7 @@ jobs:
           ls -altrh ./Contents/Resources/
         shell: bash
       - name: End-to-end test - run Browsers
+        if: github.ref == 'refs/heads/main'
         run: |
           target_dir='target/universal-apple-darwin/release'
           cd "$target_dir"
@@ -267,6 +274,7 @@ jobs:
         # special shell script to make tty working
         shell: 'script -q /dev/null bash -e {0}'
       - name: Upload mac artifacts
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v7
         with:
           name: browsers-mac-artifacts
@@ -316,6 +324,7 @@ jobs:
           cargo build --target aarch64-pc-windows-msvc --release
         shell: bash
       - name: Install tools
+        if: github.ref == 'refs/heads/main'
         run: |
           curl https://raw.githubusercontent.com/Browsers-software/ci-utils/main/zip/bzip2.dll -o bzip2.dll
           curl https://raw.githubusercontent.com/Browsers-software/ci-utils/main/zip/zip.exe -o zip.exe
@@ -323,6 +332,7 @@ jobs:
           cp zip.exe "C:\Program Files\Git\mingw64\bin"
         shell: bash
       - name: Build binaries and package
+        if: github.ref == 'refs/heads/main'
         env:
           APPCAST_SECRET_KEY_BASE64: ${{ secrets.APPCAST_SECRET_KEY_BASE64 }}
         run: |
@@ -332,6 +342,7 @@ jobs:
           ./build-windows.sh
         shell: bash
       - name: Test installer
+        if: github.ref == 'refs/heads/main'
         run: |
           target_dir='target/universal-pc-windows-msvc/release'
           cd "$target_dir"
@@ -339,6 +350,7 @@ jobs:
           ./install.bat --silent
         shell: bash
       - name: End-to-end test - run Browsers
+        if: github.ref == 'refs/heads/main'
         run: |
           install_dir="$PROGRAMFILES/software.Browsers"
           cd "$install_dir"
@@ -381,6 +393,7 @@ jobs:
           fi
         shell: bash
       - name: Upload release artifact
+        if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v7
         with:
           name: browsers-windows-artifacts
@@ -393,6 +406,7 @@ jobs:
             target/universal-pc-windows-msvc/release/browsers_windows.tar.xz.sha256
             target/universal-pc-windows-msvc/release/browsers_windows.tar.xz.sig
   release:
+    if: github.ref == 'refs/heads/main'
     needs: [ build-linux, build-macos, build-windows ]
     runs-on: ubuntu-latest
     steps:

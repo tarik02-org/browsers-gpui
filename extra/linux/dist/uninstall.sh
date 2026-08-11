@@ -43,6 +43,8 @@ if [ "$IS_LOCAL_INSTALL" = true ]; then
 
   # ~/.local/share/applications
   TARGET_DESKTOP_DIR_PATH="$XDG_DATA_HOME/applications"
+
+  TARGET_DBUS_SERVICE_DIR="$XDG_DATA_HOME/dbus-1/services"
 else
   # /usr/local/bin is for binaries not managed by package manager
   # (otherwise should use /usr/bin if using package manager)
@@ -57,6 +59,8 @@ else
   ICONS_DIR="/usr/share/icons"
 
   TARGET_DESKTOP_DIR_PATH="/usr/share/applications"
+
+  TARGET_DBUS_SERVICE_DIR="/usr/share/dbus-1/services"
 fi
 
 # Print all rm commands for observability
@@ -76,6 +80,7 @@ for size in 16 32 64 128 256 512; do
 done
 
 rm -f "$TARGET_DESKTOP_DIR_PATH/software.Browsers.desktop"
+rm -f "$TARGET_DBUS_SERVICE_DIR/software.Browsers.service"
 
 set +x
 

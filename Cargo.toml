@@ -5,7 +5,7 @@ authors = ["Madis Liias <madisliias@gmail.com>"]
 edition = "2024"
 description = "Browsers"
 homepage = "https://browsers.software/"
-repository = "https://github.com/Browsers-software/browsers"
+repository = "https://github.com/tarik02-org/browsers-gpui"
 license = "MIT OR Apache-2.0"
 build = "build.rs"
 
@@ -113,6 +113,8 @@ static_vcruntime = "3.0"
 [patch."https://github.com/zed-industries/zed"]
 gpui = { git = "https://github.com/tarik02/zed", rev = "765f26b4414ed87dad9026cbdc34ad5188b02a15", version = "=0.2.2" }
 gpui_linux = { git = "https://github.com/tarik02/zed", rev = "765f26b4414ed87dad9026cbdc34ad5188b02a15", version = "=0.1.0" }
+gpui_macros = { git = "https://github.com/tarik02/zed", rev = "765f26b4414ed87dad9026cbdc34ad5188b02a15", version = "=0.1.0" }
+gpui_platform = { git = "https://github.com/tarik02/zed", rev = "765f26b4414ed87dad9026cbdc34ad5188b02a15", version = "=0.1.0" }
 
 #[profile.dev]
 #lto = true
