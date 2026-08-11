@@ -374,7 +374,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 Initial Release
 
-[unreleased]: https://github.com/Browsers-software/browsers/compare/0.7.4...HEAD
+[unreleased]: https://github.com/tarik02-org/browsers-gpui/compare/0.7.4...HEAD
 
 [0.7.4]: https://github.com/Browsers-software/browsers/releases/tag/0.7.4
 

@@ -120,7 +120,7 @@ if exist "%ProgramDir%\" (
 )
 
 echo Browsers has been uninstalled.
-echo Please report any issues at https://github.com/Browsers-software/browsers/issues
+echo Please report any issues at https://github.com/tarik02-org/browsers-gpui/issues
 
 echo You can now press Enter to exit this uninstaller.
 set /p input=

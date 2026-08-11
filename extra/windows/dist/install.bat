@@ -204,7 +204,7 @@ REG ADD "%RegistryRoot%\Software\Microsoft\Windows\CurrentVersion\Uninstall\soft
 powershell -ExecutionPolicy Bypass -File "%THIS_DIR%announce_default.ps1" || exit /b
 
 echo Browsers has been installed. Enjoy!
-echo Please report any issues at https://github.com/Browsers-software/browsers/issues
+echo Please report any issues at https://github.com/tarik02-org/browsers-gpui/issues
 
 if not %is_silent% == true (
     echo You can now press Enter to exit this installer.
