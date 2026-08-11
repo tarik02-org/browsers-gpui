@@ -246,4 +246,4 @@ if [[ $* != *--skip-desktop-database* ]]; then
 fi
 
 echo "Browsers has been installed. Enjoy!"
-echo "Please report any issues at https://github.com/Browsers-software/browsers/issues"
+echo "Please report any issues at https://github.com/tarik02-org/browsers-gpui/issues"

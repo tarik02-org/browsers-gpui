@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Browsers-software/browsers/main/resources/icons/256x256/software.Browsers.png" width="128" />
+  <img src="https://raw.githubusercontent.com/tarik02-org/browsers-gpui/main/resources/icons/256x256/software.Browsers.png" width="128" />
   <h1 align="center">Browsers</h1>
   <h3 align="center">Open the right browser at the right time</h3>
   <h3 align="center">For Linux, Mac and Windows</h3>
@@ -62,20 +62,20 @@ Download for your platform
 
         brew install --cask browsers-software/tap/browsers
 
-  - [**Browsers.dmg**](https://github.com/Browsers-software/browsers/releases/latest/download/Browsers.dmg) (Apple Silicon and Intel based Macs)
+  - [**Browsers.dmg**](https://github.com/tarik02-org/browsers-gpui/releases/latest/download/Browsers.dmg) (Apple Silicon and Intel based Macs)
 - Linux
   - DEB package
-    - [**browsers_amd64.deb**](https://github.com/Browsers-software/browsers/releases/latest/download/browsers_amd64.deb) (x86_64)
-    - [**browsers_arm64.deb**](https://github.com/Browsers-software/browsers/releases/latest/download/browsers_arm64.deb) (arm64)
-    - [**browsers_armhf.deb**](https://github.com/Browsers-software/browsers/releases/latest/download/browsers_armhf.deb) (armv7l)
+    - [**browsers_amd64.deb**](https://github.com/tarik02-org/browsers-gpui/releases/latest/download/browsers_amd64.deb) (x86_64)
+    - [**browsers_arm64.deb**](https://github.com/tarik02-org/browsers-gpui/releases/latest/download/browsers_arm64.deb) (arm64)
+    - [**browsers_armhf.deb**](https://github.com/tarik02-org/browsers-gpui/releases/latest/download/browsers_armhf.deb) (armv7l)
   - RPM package
-    - [**browsers.x86_64.rpm**](https://github.com/Browsers-software/browsers/releases/latest/download/browsers_x86_64.deb) (x86_64)
-    - [**browsers.aarch64.rpm**](https://github.com/Browsers-software/browsers/releases/latest/download/browsers_aarch64.deb) (arm64)
-    - [**browsers.armhfp.rpm**](https://github.com/Browsers-software/browsers/releases/latest/download/browsers_armhfp.deb) (armv7l)
-  - Universal - [**browsers_linux.tar.gz**](https://github.com/Browsers-software/browsers/releases/latest/download/browsers_linux.tar.gz) (x86_64, arm64 and armv7l)
+    - [**browsers.x86_64.rpm**](https://github.com/tarik02-org/browsers-gpui/releases/latest/download/browsers.x86_64.rpm) (x86_64)
+    - [**browsers.aarch64.rpm**](https://github.com/tarik02-org/browsers-gpui/releases/latest/download/browsers.aarch64.rpm) (arm64)
+    - [**browsers.armhfp.rpm**](https://github.com/tarik02-org/browsers-gpui/releases/latest/download/browsers.armhfp.rpm) (armv7l)
+  - Universal - [**browsers_linux.tar.gz**](https://github.com/tarik02-org/browsers-gpui/releases/latest/download/browsers_linux.tar.gz) (x86_64, arm64 and armv7l)
   - Nix - use the repository flake described above
   - AUR - [browsers-bin](https://aur.archlinux.org/cgit/aur.git/tree/PKGBUILD?h=browsers-bin) and [browsers-git](https://aur.archlinux.org/cgit/aur.git/tree/PKGBUILD?h=browsers-git)
-- Windows - [**Browsers_windows.zip**](https://github.com/Browsers-software/browsers/releases/latest/download/Browsers_windows.zip) (x86_64 and arm64)
+- Windows - [**Browsers_windows.zip**](https://github.com/tarik02-org/browsers-gpui/releases/latest/download/Browsers_windows.zip) (x86_64 and arm64)
 
 ## Social
 
