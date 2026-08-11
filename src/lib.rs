@@ -1,10 +1,11 @@
+use flume::Sender;
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::fmt::Debug;
 use std::process::{Command, exit};
 use std::str::FromStr;
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Receiver;
 use tracing::{debug, info, instrument, warn};
 use url::Url;
 use url::form_urlencoded::Parse;
@@ -662,6 +663,7 @@ pub fn handle_messages_to_main(
     ui_sender: Sender<MessageToUi>,
     opening_rules_and_default_profile: &mut OpeningRulesAndDefaultProfile,
     visible_and_hidden_profiles: &mut VisibleAndHiddenProfiles,
+    behavioral_config: &mut BehavioralConfig,
     app_finder: &OSAppFinder,
 ) {
     for message in main_receiver.iter() {
@@ -671,6 +673,10 @@ pub fn handle_messages_to_main(
 
                 let config = app_finder.load_config();
                 *opening_rules_and_default_profile = get_opening_rules(&config);
+                *behavioral_config = config.get_behavior().clone();
+                ui_sender
+                    .send(MessageToUi::BehaviorUpdated((*behavioral_config).clone()))
+                    .ok();
 
                 *visible_and_hidden_profiles =
                     generate_all_browser_profiles(&config, app_finder, true);
@@ -698,8 +704,7 @@ pub fn handle_messages_to_main(
                 ui_sender.send(MessageToUi::OpenLinkCompleted).ok();
             }
             MessageToMain::UrlOpenRequest(from_bundle_id, url) => {
-                let config = app_finder.load_config();
-                let cleaned_url = unwrap_url(&url, config.get_behavior());
+                let cleaned_url = unwrap_url(&url, behavioral_config);
                 let url_open_context = UrlOpenContext {
                     cleaned_url: cleaned_url.clone(),
                     source_app_maybe: (!from_bundle_id.is_empty())
@@ -947,13 +952,14 @@ pub fn handle_messages_to_main(
             }
             MessageToMain::SaveConfigUIBehavioralSettings(settings) => {
                 info!("Saving Behavioral settings");
-                let behavioral_config = BehavioralConfig {
+                let new_behavioral_config = BehavioralConfig {
                     unwrap_urls: settings.unwrap_urls,
                 };
 
                 let mut config = app_finder.load_config();
-                config.set_behavior(behavioral_config);
+                config.set_behavior(new_behavioral_config.clone());
                 app_finder.save_config(&config);
+                *behavioral_config = new_behavioral_config;
             }
         }
     }
@@ -1121,6 +1127,7 @@ pub enum MoveTo {
 /// focus, and window lifecycle.
 pub enum MessageToUi {
     OpenLinkCompleted,
+    BehaviorUpdated(BehavioralConfig),
     UrlOpened {
         source_bundle_id: String,
         url: String,

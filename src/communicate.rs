@@ -39,6 +39,7 @@ pub struct DaemonSocket {
 impl Drop for DaemonSocket {
     fn drop(&mut self) {
         self.stopping.store(true, Ordering::Release);
+        UnixStream::connect(&self.path).ok();
         if let Some(thread) = self.thread.take() {
             thread.join().ok();
         }
@@ -64,18 +65,16 @@ pub fn start_daemon_listener(
         return Ok(None);
     };
     let listener = bind_listener(&path)?;
-    listener.set_nonblocking(true)?;
     let metadata = fs::metadata(&path)?;
     let stopping = Arc::new(AtomicBool::new(false));
     let thread_stopping = stopping.clone();
 
     let thread = thread::spawn(move || {
-        while !thread_stopping.load(Ordering::Acquire) {
+        loop {
             match listener.accept() {
+                Ok(_) if thread_stopping.load(Ordering::Acquire) => break,
                 Ok((stream, _)) => handle_connection(stream, &main_sender),
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(25));
-                }
+                Err(_) if thread_stopping.load(Ordering::Acquire) => break,
                 Err(error) => {
                     warn!("Could not accept daemon request: {error}");
                     thread::sleep(Duration::from_millis(25));
@@ -185,6 +184,7 @@ fn handle_connection(mut stream: UnixStream, main_sender: &Sender<MessageToMain>
             return;
         }
     };
+    info!("Received daemon request");
 
     if request.reload && main_sender.send(MessageToMain::Refresh).is_err() {
         warn!("Browsers backend stopped while handling a daemon request");

@@ -127,6 +127,7 @@ fn main() {
         generate_all_browser_profiles(&config, &app_finder, force_reload);
 
     let behavioral_settings = config.get_behavior();
+    let mut behavioral_config = behavioral_settings.clone();
     // TODO: url should not be considered here in case of macos
     //       and only the one in LinkOpenedFromBundle should be considered
     let cleaned_url = unwrap_url(url.as_str(), behavioral_settings);
@@ -166,7 +167,7 @@ fn main() {
         return;
     }
 
-    let (ui_sender, ui_receiver) = mpsc::channel();
+    let (ui_sender, ui_receiver) = flume::unbounded();
 
     thread::spawn(move || {
         handle_messages_to_main(
@@ -174,6 +175,7 @@ fn main() {
             ui_sender,
             &mut opening_rules_and_default_profile,
             &mut visible_and_hidden_profiles,
+            &mut behavioral_config,
             &app_finder,
         );
     });

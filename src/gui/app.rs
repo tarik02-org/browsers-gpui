@@ -4,9 +4,10 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpsc::{Receiver, Sender, TryRecvError};
+use std::sync::mpsc::Sender;
 use std::time::Duration;
 
+use flume::{Receiver as UiReceiver, Sender as SettingsSender};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyWindowHandle, App, AppContext, AssetSource, Bounds, ClipboardItem, Context, DismissEvent,
@@ -42,7 +43,7 @@ const PICKER_MENU_EXTRA_WIDTH: f32 = 220.0;
 const PICKER_MENU_EXTRA_HEIGHT: f32 = 220.0;
 const PICKER_CURSOR_OFFSET: f32 = 8.0;
 const PICKER_SCREEN_MARGIN: f32 = 8.0;
-const PICKER_PLACEMENT_TIMEOUT: Duration = Duration::from_millis(100);
+const PICKER_PLACEMENT_TIMEOUT: Duration = Duration::from_millis(30);
 const TRASH_ICON_PATH: &str = "icons/trash-2.svg";
 const TRASH_ICON: &[u8] = include_bytes!("../../resources/icons/trash-2.svg");
 const SETTINGS_WIDTH: f32 = 680.0;
@@ -154,14 +155,12 @@ impl RuleEditor {
 pub struct BrowserApp {
     state: UIState,
     main_sender: Sender<MessageToMain>,
-    ui_receiver: Receiver<MessageToUi>,
     unwrap_urls: Arc<AtomicBool>,
     screen: Screen,
     focus_handle: FocusHandle,
     rule_editors: Vec<RuleEditor>,
     ever_activated: bool,
-    settings_updates_sender: Sender<PickerSettingsUpdate>,
-    settings_updates_receiver: Receiver<PickerSettingsUpdate>,
+    settings_updates_sender: SettingsSender<PickerSettingsUpdate>,
     auxiliary_windows: Arc<AtomicUsize>,
     settings_window: Option<AnyWindowHandle>,
     about_window: Option<AnyWindowHandle>,
@@ -172,6 +171,7 @@ pub struct BrowserApp {
     persistent: bool,
     is_auxiliary: bool,
     _event_task: Option<Task<()>>,
+    _settings_task: Option<Task<()>>,
     _placement_task: Option<Task<()>>,
     _activation_subscription: Option<Subscription>,
 }
@@ -180,7 +180,7 @@ impl BrowserApp {
     fn new(
         state: UIState,
         main_sender: Sender<MessageToMain>,
-        ui_receiver: Receiver<MessageToUi>,
+        ui_receiver: UiReceiver<MessageToUi>,
         unwrap_urls: Arc<AtomicBool>,
         is_layer_shell: bool,
         persistent: bool,
@@ -189,7 +189,7 @@ impl BrowserApp {
     ) -> Self {
         apply_theme(state.ui_settings.visual_settings.theme, Some(window), cx);
 
-        let (settings_updates_sender, settings_updates_receiver) = std::sync::mpsc::channel();
+        let (settings_updates_sender, settings_updates_receiver) = flume::unbounded();
         let auxiliary_windows = Arc::new(AtomicUsize::new(0));
 
         let focus_handle = cx.focus_handle();
@@ -214,13 +214,22 @@ impl BrowserApp {
         });
 
         let event_task = cx.spawn_in(window, async move |this, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(25))
-                    .await;
+            while let Ok(message) = ui_receiver.recv_async().await {
                 if this
                     .update_in(cx, |this, window, cx| {
-                        this.drain_ui_events(window, cx);
+                        this.handle_ui_event(message, window, cx);
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        let settings_task = cx.spawn_in(window, async move |this, cx| {
+            while let Ok(update) = settings_updates_receiver.recv_async().await {
+                if this
+                    .update_in(cx, |this, window, cx| {
+                        this.handle_settings_update(update, window, cx);
                     })
                     .is_err()
                 {
@@ -232,14 +241,12 @@ impl BrowserApp {
         let mut app = Self {
             state,
             main_sender,
-            ui_receiver,
             unwrap_urls,
             screen: Screen::Picker,
             focus_handle,
             rule_editors: Vec::new(),
             ever_activated: false,
             settings_updates_sender,
-            settings_updates_receiver,
             auxiliary_windows,
             settings_window: None,
             about_window: None,
@@ -250,6 +257,7 @@ impl BrowserApp {
             persistent,
             is_auxiliary: false,
             _event_task: Some(event_task),
+            _settings_task: Some(settings_task),
             _placement_task: None,
             _activation_subscription: Some(activation_subscription),
         };
@@ -264,7 +272,7 @@ impl BrowserApp {
         main_sender: Sender<MessageToMain>,
         unwrap_urls: Arc<AtomicBool>,
         screen: Screen,
-        settings_updates_sender: Sender<PickerSettingsUpdate>,
+        settings_updates_sender: SettingsSender<PickerSettingsUpdate>,
         auxiliary_windows: Arc<AtomicUsize>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -283,20 +291,15 @@ impl BrowserApp {
         } else {
             Vec::new()
         };
-        let (_, ui_receiver) = std::sync::mpsc::channel();
-        let (_, settings_updates_receiver) = std::sync::mpsc::channel();
-
         Self {
             state,
             main_sender,
-            ui_receiver,
             unwrap_urls,
             screen,
             focus_handle,
             rule_editors,
             ever_activated: false,
             settings_updates_sender,
-            settings_updates_receiver,
             auxiliary_windows,
             settings_window: None,
             about_window: None,
@@ -307,6 +310,7 @@ impl BrowserApp {
             persistent: false,
             is_auxiliary: true,
             _event_task: None,
+            _settings_task: None,
             _placement_task: None,
             _activation_subscription: None,
         }
@@ -397,6 +401,7 @@ impl BrowserApp {
     }
 
     fn show_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        info!("Showing picker");
         self.picker_visible = true;
         self.context_menu_expanded = false;
         self.picker_placement = PickerPlacement::Waiting;
@@ -408,9 +413,9 @@ impl BrowserApp {
             self.start_picker_placement(window, cx);
         } else {
             window.resize(self.current_picker_size());
+            window.activate_window();
         }
 
-        window.activate_window();
         self.focus_handle.focus(window, cx);
         cx.notify();
     }
@@ -433,66 +438,69 @@ impl BrowserApp {
         cx.notify();
     }
 
-    fn drain_ui_events(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let mut changed = false;
-        loop {
-            match self.settings_updates_receiver.try_recv() {
-                Ok(PickerSettingsUpdate::Theme(theme)) => {
-                    self.state.ui_settings.visual_settings.theme = theme;
-                    apply_theme(theme, Some(window), cx);
-                    changed = true;
-                }
-                Ok(PickerSettingsUpdate::ShowHotkeys(show)) => {
-                    self.state.ui_settings.visual_settings.show_hotkeys = show;
-                    changed = true;
-                }
-                Ok(PickerSettingsUpdate::QuitOnLostFocus(quit)) => {
-                    self.state.ui_settings.visual_settings.quit_on_lost_focus = quit;
-                    changed = true;
-                }
-                Ok(PickerSettingsUpdate::UnwrapUrls(unwrap)) => {
-                    self.state.ui_settings.behavioral_settings.unwrap_urls = unwrap;
-                    changed = true;
-                }
-                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+    fn handle_settings_update(
+        &mut self,
+        update: PickerSettingsUpdate,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match update {
+            PickerSettingsUpdate::Theme(theme) => {
+                self.state.ui_settings.visual_settings.theme = theme;
+                apply_theme(theme, Some(window), cx);
+            }
+            PickerSettingsUpdate::ShowHotkeys(show) => {
+                self.state.ui_settings.visual_settings.show_hotkeys = show;
+            }
+            PickerSettingsUpdate::QuitOnLostFocus(quit) => {
+                self.state.ui_settings.visual_settings.quit_on_lost_focus = quit;
+            }
+            PickerSettingsUpdate::UnwrapUrls(unwrap) => {
+                self.state.ui_settings.behavioral_settings.unwrap_urls = unwrap;
             }
         }
-        loop {
-            match self.ui_receiver.try_recv() {
-                Ok(MessageToUi::OpenLinkCompleted) => {
-                    info!("Link opened; dismissing picker");
-                    self.dismiss_picker(window, cx);
-                    return;
-                }
-                Ok(MessageToUi::UrlOpened {
-                    source_bundle_id,
-                    url,
-                }) => {
-                    self.state.set_url(url.clone());
-                    self.resize_picker(window);
-                    self.show_picker(window, cx);
-                    self.main_sender
-                        .send(MessageToMain::LinkOpenedFromBundle(source_bundle_id, url))
-                        .ok();
-                    changed = true;
-                }
-                Ok(MessageToUi::BrowsersUpdated(browsers)) => {
-                    self.state.browsers = Arc::new(browsers);
-                    self.state.filtered_browsers =
-                        Arc::new(get_filtered_browsers(&self.state.url, &self.state.browsers));
-                    self.resize_picker(window);
-                    changed = true;
-                }
-                Ok(MessageToUi::HiddenBrowsersUpdated(browsers)) => {
-                    self.state.restorable_app_profiles = Arc::new(browsers);
-                    changed = true;
-                }
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => break,
+        cx.notify();
+    }
+
+    fn handle_ui_event(
+        &mut self,
+        message: MessageToUi,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match message {
+            MessageToUi::OpenLinkCompleted => {
+                info!("Link opened; dismissing picker");
+                self.dismiss_picker(window, cx);
             }
-        }
-        if changed {
-            cx.notify();
+            MessageToUi::BehaviorUpdated(behavior) => {
+                self.unwrap_urls
+                    .store(behavior.unwrap_urls, Ordering::Relaxed);
+                self.state.ui_settings.behavioral_settings.unwrap_urls = behavior.unwrap_urls;
+                cx.notify();
+            }
+            MessageToUi::UrlOpened {
+                source_bundle_id,
+                url,
+            } => {
+                self.state.set_url(url.clone());
+                self.resize_picker(window);
+                self.show_picker(window, cx);
+                self.main_sender
+                    .send(MessageToMain::LinkOpenedFromBundle(source_bundle_id, url))
+                    .ok();
+            }
+            MessageToUi::BrowsersUpdated(browsers) => {
+                self.state.browsers = Arc::new(browsers);
+                self.state.filtered_browsers =
+                    Arc::new(get_filtered_browsers(&self.state.url, &self.state.browsers));
+                self.resize_picker(window);
+                cx.notify();
+            }
+            MessageToUi::HiddenBrowsersUpdated(browsers) => {
+                self.state.restorable_app_profiles = Arc::new(browsers);
+                cx.notify();
+            }
         }
     }
 
@@ -2099,7 +2107,7 @@ fn open_picker_window(
     cx: &mut App,
     state: UIState,
     main_sender: Sender<MessageToMain>,
-    ui_receiver: Rc<RefCell<Option<Receiver<MessageToUi>>>>,
+    ui_receiver: Rc<RefCell<Option<UiReceiver<MessageToUi>>>>,
     unwrap_urls: Arc<AtomicBool>,
     use_layer_shell: bool,
     persistent: bool,
@@ -2130,7 +2138,7 @@ fn open_picker_window(
 pub fn run(
     state: UIState,
     main_sender: Sender<MessageToMain>,
-    ui_receiver: Receiver<MessageToUi>,
+    ui_receiver: UiReceiver<MessageToUi>,
     persistent: bool,
 ) {
     let unwrap_urls = Arc::new(AtomicBool::new(
