@@ -3,19 +3,18 @@
 use rolling_file;
 use rolling_file::{BasicRollingFileAppender, RollingConditionBasic};
 use std::str::FromStr;
-use std::sync::mpsc;
-use std::{env, fs, thread};
+use std::{env, fs};
 use tracing::{Level, info};
 use tracing_subscriber;
 use tracing_subscriber::fmt::time::OffsetTime;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 
+use browsers::paths;
 use browsers::utils::OSAppFinder;
 use browsers::{
-    MessageToMain, UrlOpenContext, generate_all_browser_profiles, get_opening_rules,
-    open_link_if_matching_rule, prepare_ui, unwrap_url, utils,
+    UrlOpenContext, generate_all_browser_profiles, get_opening_rules, open_link_if_matching_rule,
+    prepare_ui, unwrap_url, utils,
 };
-use browsers::{handle_messages_to_main, paths};
 
 fn main() {
     let offset_time = OffsetTime::local_rfc_3339().expect("could not get local offset!");
@@ -66,13 +65,11 @@ fn main() {
     let show_gui = !args.contains(&"--no-gui".to_string());
     let force_reload = args.contains(&"--reload".to_string());
 
-    let (main_sender, main_receiver) = mpsc::channel::<MessageToMain>();
-
     let app_finder = OSAppFinder::new();
     let config = app_finder.load_config();
-    let mut opening_rules_and_default_profile = get_opening_rules(&config);
+    let opening_rules_and_default_profile = get_opening_rules(&config);
 
-    let mut visible_and_hidden_profiles =
+    let visible_and_hidden_profiles =
         generate_all_browser_profiles(&config, &app_finder, force_reload);
 
     let behavioral_settings = config.get_behavior();
@@ -97,32 +94,21 @@ fn main() {
     let is_default = utils::is_default_web_browser();
     let show_set_as_default = !is_default;
 
-    let ui = prepare_ui(
+    let ui_state = prepare_ui(
         &url_open_context,
-        main_sender.clone(),
         &visible_and_hidden_profiles,
         &config,
         show_set_as_default,
     );
 
     if !show_gui {
-        ui.print_visible_options();
+        println!("BROWSERS");
+        println!();
+        for browser in ui_state.filtered_browsers.iter() {
+            println!("{}", browser.get_full_name());
+        }
         return;
     }
 
-    let launcher = ui.create_app_launcher();
-    let ui_event_sink = launcher.get_external_handle();
-
-    thread::spawn(move || {
-        handle_messages_to_main(
-            main_receiver,
-            ui_event_sink,
-            &mut opening_rules_and_default_profile,
-            &mut visible_and_hidden_profiles,
-            &app_finder,
-        );
-    });
-
-    let initial_ui_state = ui.create_initial_ui_state();
-    launcher.launch(initial_ui_state).expect("error");
+    eprintln!("Browsers was built without a desktop UI");
 }
