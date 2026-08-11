@@ -7,6 +7,9 @@
 
 ![MIT/Apache 2.0](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)
 
+> This fork replaces the original Druid interface with a compact GPUI and
+> gpui-component desktop interface.
+
 ## Description
 
 Browsers is an intuitive context menu that pops up when you press a link in an app other than a web browser.
@@ -34,6 +37,24 @@ Popover menu with list of browsers and browser profiles is shown that user can c
 
 ### Download
 
+#### Nix / NixOS
+
+Run directly from the repository:
+
+```sh
+nix run github:tarik02-org/browsers-gpui
+```
+
+Or add the flake as an input and use its package directly:
+
+```nix
+inputs.browsers-gpui.url = "github:tarik02-org/browsers-gpui";
+
+environment.systemPackages = [
+  inputs.browsers-gpui.packages.${pkgs.system}.default
+];
+```
+
 Download for your platform
 
 - macOS
@@ -52,7 +73,7 @@ Download for your platform
     - [**browsers.aarch64.rpm**](https://github.com/Browsers-software/browsers/releases/latest/download/browsers_aarch64.deb) (arm64)
     - [**browsers.armhfp.rpm**](https://github.com/Browsers-software/browsers/releases/latest/download/browsers_armhfp.deb) (armv7l)
   - Universal - [**browsers_linux.tar.gz**](https://github.com/Browsers-software/browsers/releases/latest/download/browsers_linux.tar.gz) (x86_64, arm64 and armv7l)
-  - Nix - [#130](https://github.com/Browsers-software/browsers/issues/130)
+  - Nix - use the repository flake described above
   - AUR - [browsers-bin](https://aur.archlinux.org/cgit/aur.git/tree/PKGBUILD?h=browsers-bin) and [browsers-git](https://aur.archlinux.org/cgit/aur.git/tree/PKGBUILD?h=browsers-git)
 - Windows - [**Browsers_windows.zip**](https://github.com/Browsers-software/browsers/releases/latest/download/Browsers_windows.zip) (x86_64 and arm64)
 

@@ -5,7 +5,7 @@ authors = ["Madis Liias <madisliias@gmail.com>"]
 edition = "2024"
 description = "Browsers"
 homepage = "https://browsers.software/"
-repository = "https://github.com/Browsers-software/browsers"
+repository = "https://github.com/tarik02-org/browsers-gpui"
 license = "MIT OR Apache-2.0"
 build = "build.rs"
 

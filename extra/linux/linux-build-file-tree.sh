@@ -42,6 +42,12 @@ create_package_content() {
   local desktop_file_path="$package_src_dir/usr/share/applications/software.Browsers.desktop"
   sed "s|€ExecCommand€|$target_install_binary_path %u|g" "$template_desktop_file_path" > "$desktop_file_path"
 
+  mkdir -p "$package_src_dir/usr/share/dbus-1/services"
+  local template_dbus_service_file_path="$EXTRA_LINUX_DIST_PATH/software.Browsers.service"
+  local dbus_service_file_path="$package_src_dir/usr/share/dbus-1/services/software.Browsers.service"
+  sed "s|€ExecCommand€|$target_install_binary_path|g" "$template_dbus_service_file_path" > "$dbus_service_file_path"
+  chmod 0644 "$dbus_service_file_path"
+
   local template_xfce4_desktop_file_path="$EXTRA_LINUX_DIST_PATH/xfce4/helpers/software.Browsers.template.desktop"
   local xfce4_desktop_file_path="$package_src_dir/usr/share/applications/xfce4/helpers/software.Browsers.desktop"
 
