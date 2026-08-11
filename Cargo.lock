@@ -808,6 +808,7 @@ dependencies = [
  "dark-light",
  "dirs 6.0.0",
  "dunce",
+ "flume",
  "freedesktop-desktop-entry",
  "freedesktop-icons",
  "globset",
@@ -837,6 +838,7 @@ dependencies = [
  "winres",
  "winsplit",
  "xdg-mime",
+ "zbus",
 ]
 
 [[package]]

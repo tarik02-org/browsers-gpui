@@ -38,6 +38,7 @@ gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", 
 # Browser/profile icon decoding and cache generation.
 image = { version = "0.24.9", default-features = false, features = ["png", "jpeg"] }
 anyhow = "1.0"
+flume = "0.12"
 
 # parse urls
 url = "2.5.7"
@@ -71,6 +72,7 @@ libc = "0.2.154"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 xdg-mime = "^0.4.0"
+zbus = "5.19.0"
 
 # to find application .desktop files
 freedesktop-desktop-entry = "0.8.0"
