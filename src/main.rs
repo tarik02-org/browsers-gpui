@@ -36,6 +36,9 @@ fn main() {
         let request = browsers::communicate::DaemonRequest {
             url: requested_url.clone(),
             reload: force_reload,
+            activation_token: env::var("XDG_ACTIVATION_TOKEN")
+                .ok()
+                .filter(|token| !token.is_empty()),
         };
         match browsers::communicate::forward_or_start(&request) {
             Ok(()) => return,
@@ -55,6 +58,13 @@ fn main() {
     if is_daemon {
         eprintln!("Browsers daemon is currently supported only on Linux Wayland");
         return;
+    }
+
+    if is_daemon {
+        // The long-running daemon must not consume the activation token intended for a picker.
+        // Each short-lived client forwards its current token over the socket.
+        // SAFETY: No worker threads have started yet.
+        unsafe { env::remove_var("XDG_ACTIVATION_TOKEN") };
     }
 
     let offset_time = OffsetTime::local_rfc_3339().expect("could not get local offset!");

@@ -25,6 +25,8 @@ const START_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct DaemonRequest {
     pub url: String,
     pub reload: bool,
+    #[serde(default)]
+    pub activation_token: Option<String>,
 }
 
 pub struct DaemonSocket {
@@ -191,7 +193,11 @@ fn handle_connection(mut stream: UnixStream, main_sender: &Sender<MessageToMain>
         std::process::exit(1);
     }
     if main_sender
-        .send(MessageToMain::UrlOpenRequest(String::new(), request.url))
+        .send(MessageToMain::UrlOpenRequest(
+            String::new(),
+            request.url,
+            request.activation_token,
+        ))
         .is_err()
     {
         warn!("Browsers backend stopped while handling a daemon request");

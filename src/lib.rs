@@ -703,7 +703,7 @@ pub fn handle_messages_to_main(
                 profile.open_link(url.as_str(), incognito_mode);
                 ui_sender.send(MessageToUi::OpenLinkCompleted).ok();
             }
-            MessageToMain::UrlOpenRequest(from_bundle_id, url) => {
+            MessageToMain::UrlOpenRequest(from_bundle_id, url, activation_token) => {
                 let cleaned_url = unwrap_url(&url, behavioral_config);
                 let url_open_context = UrlOpenContext {
                     cleaned_url: cleaned_url.clone(),
@@ -722,6 +722,7 @@ pub fn handle_messages_to_main(
                         .send(MessageToUi::UrlOpened {
                             source_bundle_id: from_bundle_id,
                             url: cleaned_url,
+                            activation_token,
                         })
                         .ok();
                 }
@@ -733,6 +734,7 @@ pub fn handle_messages_to_main(
                     .send(MessageToUi::UrlOpened {
                         source_bundle_id: from_bundle_id,
                         url: new_modified_url,
+                        activation_token: None,
                     })
                     .ok();
             }
@@ -1131,6 +1133,7 @@ pub enum MessageToUi {
     UrlOpened {
         source_bundle_id: String,
         url: String,
+        activation_token: Option<String>,
     },
     BrowsersUpdated(Vec<UIBrowser>),
     HiddenBrowsersUpdated(Vec<UIBrowser>),
@@ -1141,7 +1144,7 @@ pub enum MessageToMain {
     Refresh,
     OpenLink(usize, bool, String),
     // UrlOpenRequest is almost like LinkOpenedFromBundle, but triggers gui, not from gui
-    UrlOpenRequest(String, String),
+    UrlOpenRequest(String, String, Option<String>),
     UrlPassedToMain(String, String, BehavioralConfig),
     LinkOpenedFromBundle(String, String),
     SetBrowsersAsDefaultBrowser,

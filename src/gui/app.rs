@@ -11,11 +11,11 @@ use flume::{Receiver as UiReceiver, Sender as SettingsSender};
 use gpui::prelude::FluentBuilder;
 use gpui::{
     AnyWindowHandle, App, AppContext, AssetSource, Bounds, ClipboardItem, Context, DismissEvent,
-    Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyDownEvent,
-    ModifiersChangedEvent, MouseButton, MouseMoveEvent, ParentElement, Pixels, Point, Render,
-    SharedString, Size, StatefulInteractiveElement, Styled, Subscription, Task, TitlebarOptions,
-    Window, WindowBackgroundAppearance, WindowBounds, WindowDecorations, WindowKind, WindowOptions,
-    img, px, size,
+    Entity, FocusHandle, Focusable, Global, InteractiveElement, IntoElement, KeyDownEvent,
+    ModifiersChangedEvent, MouseButton, MouseMoveEvent, ParentElement, Pixels, Point, QuitMode,
+    Render, SharedString, Size, StatefulInteractiveElement, Styled, Subscription, Task,
+    TitlebarOptions, Window, WindowBackgroundAppearance, WindowBounds, WindowDecorations,
+    WindowHandle, WindowKind, WindowOptions, img, px, size,
 };
 use gpui_component::button::{Button, ButtonVariants};
 use gpui_component::input::{Input, InputState};
@@ -43,7 +43,6 @@ const PICKER_MENU_EXTRA_WIDTH: f32 = 220.0;
 const PICKER_MENU_EXTRA_HEIGHT: f32 = 220.0;
 const PICKER_CURSOR_OFFSET: f32 = 8.0;
 const PICKER_SCREEN_MARGIN: f32 = 8.0;
-const PICKER_PLACEMENT_TIMEOUT: Duration = Duration::from_millis(30);
 const TRASH_ICON_PATH: &str = "icons/trash-2.svg";
 const TRASH_ICON: &[u8] = include_bytes!("../../resources/icons/trash-2.svg");
 const SETTINGS_WIDTH: f32 = 680.0;
@@ -117,6 +116,14 @@ enum PickerPlacement {
     Placed(Point<Pixels>),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PickerWindowPlacement {
+    UnderCursor,
+    PointerProbe,
+    Default,
+}
+
+#[derive(Clone, Copy)]
 enum PickerSettingsUpdate {
     Theme(ConfiguredTheme),
     ShowHotkeys(bool),
@@ -128,6 +135,12 @@ struct RuleEditor {
     source_app: Entity<InputState>,
     url_pattern: Entity<InputState>,
     opener: Option<UIProfileAndIncognito>,
+}
+
+#[derive(Default)]
+struct AuxiliaryWindowHandles {
+    settings: Option<AnyWindowHandle>,
+    about: Option<AnyWindowHandle>,
 }
 
 impl RuleEditor {
@@ -162,8 +175,8 @@ pub struct BrowserApp {
     ever_activated: bool,
     settings_updates_sender: SettingsSender<PickerSettingsUpdate>,
     auxiliary_windows: Arc<AtomicUsize>,
-    settings_window: Option<AnyWindowHandle>,
-    about_window: Option<AnyWindowHandle>,
+    auxiliary_window_handles: Rc<RefCell<AuxiliaryWindowHandles>>,
+    picker_window: Option<WindowHandle<BrowserApp>>,
     context_menu_expanded: bool,
     picker_placement: PickerPlacement,
     picker_visible: bool,
@@ -176,7 +189,71 @@ pub struct BrowserApp {
     _activation_subscription: Option<Subscription>,
 }
 
+struct DaemonApp {
+    _app: Entity<BrowserApp>,
+}
+
+impl Global for DaemonApp {}
+
 impl BrowserApp {
+    fn new_daemon(
+        state: UIState,
+        main_sender: Sender<MessageToMain>,
+        ui_receiver: UiReceiver<MessageToUi>,
+        unwrap_urls: Arc<AtomicBool>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let (settings_updates_sender, settings_updates_receiver) = flume::unbounded();
+        let auxiliary_windows = Arc::new(AtomicUsize::new(0));
+        let auxiliary_window_handles = Rc::new(RefCell::new(AuxiliaryWindowHandles::default()));
+        let focus_handle = cx.focus_handle();
+
+        let event_task = cx.spawn(async move |this, cx| {
+            while let Ok(message) = ui_receiver.recv_async().await {
+                if this
+                    .update(cx, |this, cx| this.handle_ui_event(message, None, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        let settings_task = cx.spawn(async move |this, cx| {
+            while let Ok(update) = settings_updates_receiver.recv_async().await {
+                if this
+                    .update(cx, |this, cx| this.handle_settings_update(update, None, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+
+        Self {
+            state,
+            main_sender,
+            unwrap_urls,
+            screen: Screen::Picker,
+            focus_handle,
+            rule_editors: Vec::new(),
+            ever_activated: false,
+            settings_updates_sender,
+            auxiliary_windows,
+            auxiliary_window_handles,
+            picker_window: None,
+            context_menu_expanded: false,
+            picker_placement: PickerPlacement::Waiting,
+            picker_visible: false,
+            is_layer_shell: false,
+            persistent: true,
+            is_auxiliary: false,
+            _event_task: Some(event_task),
+            _settings_task: Some(settings_task),
+            _placement_task: None,
+            _activation_subscription: None,
+        }
+    }
+
     fn new(
         state: UIState,
         main_sender: Sender<MessageToMain>,
@@ -191,6 +268,7 @@ impl BrowserApp {
 
         let (settings_updates_sender, settings_updates_receiver) = flume::unbounded();
         let auxiliary_windows = Arc::new(AtomicUsize::new(0));
+        let auxiliary_window_handles = Rc::new(RefCell::new(AuxiliaryWindowHandles::default()));
 
         let focus_handle = cx.focus_handle();
         let picker_visible = !persistent;
@@ -217,7 +295,7 @@ impl BrowserApp {
             while let Ok(message) = ui_receiver.recv_async().await {
                 if this
                     .update_in(cx, |this, window, cx| {
-                        this.handle_ui_event(message, window, cx);
+                        this.handle_ui_event(message, Some(window), cx);
                     })
                     .is_err()
                 {
@@ -229,7 +307,7 @@ impl BrowserApp {
             while let Ok(update) = settings_updates_receiver.recv_async().await {
                 if this
                     .update_in(cx, |this, window, cx| {
-                        this.handle_settings_update(update, window, cx);
+                        this.handle_settings_update(update, Some(window), cx);
                     })
                     .is_err()
                 {
@@ -248,8 +326,8 @@ impl BrowserApp {
             ever_activated: false,
             settings_updates_sender,
             auxiliary_windows,
-            settings_window: None,
-            about_window: None,
+            auxiliary_window_handles,
+            picker_window: None,
             context_menu_expanded: false,
             picker_placement: PickerPlacement::Waiting,
             picker_visible,
@@ -274,6 +352,8 @@ impl BrowserApp {
         screen: Screen,
         settings_updates_sender: SettingsSender<PickerSettingsUpdate>,
         auxiliary_windows: Arc<AtomicUsize>,
+        auxiliary_window_handles: Rc<RefCell<AuxiliaryWindowHandles>>,
+        is_layer_shell: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -291,7 +371,23 @@ impl BrowserApp {
         } else {
             Vec::new()
         };
-        Self {
+        let activation_subscription = if screen == Screen::Picker {
+            Some(cx.observe_window_activation(window, |this, window, cx| {
+                if window.is_window_active() {
+                    this.ever_activated = true;
+                } else if this.picker_visible
+                    && this.ever_activated
+                    && this.auxiliary_windows.load(Ordering::Relaxed) <= 1
+                    && this.state.ui_settings.visual_settings.quit_on_lost_focus
+                {
+                    info!("Picker lost focus; dismissing");
+                    this.dismiss_picker(window, cx);
+                }
+            }))
+        } else {
+            None
+        };
+        let mut app = Self {
             state,
             main_sender,
             unwrap_urls,
@@ -301,19 +397,23 @@ impl BrowserApp {
             ever_activated: false,
             settings_updates_sender,
             auxiliary_windows,
-            settings_window: None,
-            about_window: None,
+            auxiliary_window_handles,
+            picker_window: None,
             context_menu_expanded: false,
             picker_placement: PickerPlacement::Waiting,
             picker_visible: true,
-            is_layer_shell: false,
+            is_layer_shell,
             persistent: false,
             is_auxiliary: true,
             _event_task: None,
             _settings_task: None,
             _placement_task: None,
-            _activation_subscription: None,
+            _activation_subscription: activation_subscription,
+        };
+        if is_layer_shell {
+            app.start_picker_placement(window, cx);
         }
+        app
     }
 
     fn start_picker_placement(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -322,31 +422,6 @@ impl BrowserApp {
         }
 
         self._placement_task = Some(cx.spawn_in(window, async move |this, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(10))
-                .await;
-
-            let placed_at_pointer = this
-                .update_in(cx, |this, window, cx| {
-                    if !this.picker_visible
-                        || !matches!(this.picker_placement, PickerPlacement::Waiting)
-                    {
-                        return true;
-                    }
-                    if !window.is_window_hovered() {
-                        return false;
-                    }
-
-                    this.place_picker_at(window.mouse_position(), window, cx)
-                })
-                .unwrap_or(true);
-            if placed_at_pointer {
-                return;
-            }
-
-            cx.background_executor()
-                .timer(PICKER_PLACEMENT_TIMEOUT - Duration::from_millis(10))
-                .await;
             loop {
                 let placed = this
                     .update_in(cx, |this, window, cx| {
@@ -355,26 +430,18 @@ impl BrowserApp {
                         {
                             return true;
                         }
-
-                        let viewport = window.viewport_size();
-                        if viewport.width <= px(0.0) || viewport.height <= px(0.0) {
+                        if !window.is_window_hovered() {
                             return false;
                         }
 
-                        let size = this.current_picker_size();
-                        let origin = centered_picker_origin(viewport, size);
-                        info!(?origin, ?viewport, "Positioned layer-shell picker at fallback");
-                        this.picker_placement = PickerPlacement::Placed(origin);
-                        this.set_picker_input_region(window, size);
-                        cx.notify();
-                        true
+                        this.place_picker_at(window.mouse_position(), window, cx)
                     })
                     .unwrap_or(true);
                 if placed {
                     break;
                 }
                 cx.background_executor()
-                    .timer(Duration::from_millis(25))
+                    .timer(Duration::from_millis(10))
                     .await;
             }
         }));
@@ -393,7 +460,7 @@ impl BrowserApp {
 
         let size = self.current_picker_size();
         let origin = picker_origin(pointer, viewport, size);
-        info!(?origin, cursor = ?pointer, ?viewport, "Positioned layer-shell picker");
+        info!(?origin, cursor = ?pointer, ?viewport, "Positioned fallback picker");
         self.picker_placement = PickerPlacement::Placed(origin);
         self.set_picker_input_region(window, size);
         cx.notify();
@@ -422,7 +489,11 @@ impl BrowserApp {
 
     fn dismiss_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.persistent {
-            cx.quit();
+            if self.is_auxiliary {
+                window.remove_window();
+            } else {
+                cx.quit();
+            }
             return;
         }
 
@@ -441,13 +512,13 @@ impl BrowserApp {
     fn handle_settings_update(
         &mut self,
         update: PickerSettingsUpdate,
-        window: &mut Window,
+        window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
         match update {
             PickerSettingsUpdate::Theme(theme) => {
                 self.state.ui_settings.visual_settings.theme = theme;
-                apply_theme(theme, Some(window), cx);
+                apply_theme(theme, window, cx);
             }
             PickerSettingsUpdate::ShowHotkeys(show) => {
                 self.state.ui_settings.visual_settings.show_hotkeys = show;
@@ -459,46 +530,185 @@ impl BrowserApp {
                 self.state.ui_settings.behavioral_settings.unwrap_urls = unwrap;
             }
         }
+
+        if let Some(handle) = self.picker_window
+            && handle
+                .update(cx, |picker, window, cx| {
+                    picker.handle_settings_update(update, Some(window), cx)
+                })
+                .is_err()
+        {
+            self.picker_window = None;
+        }
         cx.notify();
+    }
+
+    fn close_daemon_picker(&mut self, cx: &mut Context<Self>) {
+        if let Some(handle) = self.picker_window.take() {
+            handle
+                .update(cx, |_, window, _| window.remove_window())
+                .ok();
+        }
+    }
+
+    fn try_open_daemon_picker(
+        &self,
+        placement: PickerWindowPlacement,
+        activation_token: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> anyhow::Result<WindowHandle<BrowserApp>> {
+        let state = self.state.clone();
+        let options = picker_window_options(&state, placement, false, activation_token, cx);
+        let main_sender = self.main_sender.clone();
+        let unwrap_urls = self.unwrap_urls.clone();
+        let settings_updates_sender = self.settings_updates_sender.clone();
+        let auxiliary_windows = self.auxiliary_windows.clone();
+        let auxiliary_window_handles = self.auxiliary_window_handles.clone();
+        auxiliary_windows.fetch_add(1, Ordering::Relaxed);
+
+        let result = cx.open_window(options, move |window, cx| {
+            cx.new(|cx| {
+                BrowserApp::new_auxiliary(
+                    state,
+                    main_sender,
+                    unwrap_urls,
+                    Screen::Picker,
+                    settings_updates_sender,
+                    auxiliary_windows,
+                    auxiliary_window_handles,
+                    placement == PickerWindowPlacement::PointerProbe,
+                    window,
+                    cx,
+                )
+            })
+        });
+        if result.is_err() {
+            self.auxiliary_windows.fetch_sub(1, Ordering::Relaxed);
+        }
+        result
+    }
+
+    fn open_daemon_picker(&mut self, activation_token: Option<String>, cx: &mut Context<Self>) {
+        self.close_daemon_picker(cx);
+        info!("Creating picker window under cursor");
+
+        let result = self
+            .try_open_daemon_picker(
+                PickerWindowPlacement::UnderCursor,
+                activation_token.clone(),
+                cx,
+            )
+            .or_else(|error| {
+                info!("Plasma cursor placement unavailable, using pointer probe: {error}");
+                self.try_open_daemon_picker(
+                    PickerWindowPlacement::PointerProbe,
+                    activation_token.clone(),
+                    cx,
+                )
+            })
+            .or_else(|error| {
+                warn!("Layer-shell pointer probe unavailable, using compositor placement: {error}");
+                self.try_open_daemon_picker(PickerWindowPlacement::Default, activation_token, cx)
+            });
+
+        match result {
+            Ok(handle) => {
+                self.picker_window = Some(handle);
+                info!("Created picker window");
+                cx.activate(true);
+            }
+            Err(error) => {
+                warn!("Could not create picker window: {error}");
+            }
+        }
     }
 
     fn handle_ui_event(
         &mut self,
         message: MessageToUi,
-        window: &mut Window,
+        mut window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
         match message {
             MessageToUi::OpenLinkCompleted => {
                 info!("Link opened; dismissing picker");
-                self.dismiss_picker(window, cx);
+                if self.persistent && self.picker_window.is_some() {
+                    self.close_daemon_picker(cx);
+                } else if let Some(window) = window.as_deref_mut() {
+                    self.dismiss_picker(window, cx);
+                }
             }
             MessageToUi::BehaviorUpdated(behavior) => {
                 self.unwrap_urls
                     .store(behavior.unwrap_urls, Ordering::Relaxed);
                 self.state.ui_settings.behavioral_settings.unwrap_urls = behavior.unwrap_urls;
+                if let Some(handle) = self.picker_window
+                    && handle
+                        .update(cx, |picker, _, cx| {
+                            picker.state.ui_settings.behavioral_settings.unwrap_urls =
+                                behavior.unwrap_urls;
+                            cx.notify();
+                        })
+                        .is_err()
+                {
+                    self.picker_window = None;
+                }
                 cx.notify();
             }
             MessageToUi::UrlOpened {
                 source_bundle_id,
                 url,
+                activation_token,
             } => {
                 self.state.set_url(url.clone());
-                self.resize_picker(window);
-                self.show_picker(window, cx);
+                if self.persistent {
+                    self.open_daemon_picker(activation_token, cx);
+                } else if let Some(window) = window.as_deref_mut() {
+                    self.resize_picker(window);
+                    self.show_picker(window, cx);
+                }
                 self.main_sender
                     .send(MessageToMain::LinkOpenedFromBundle(source_bundle_id, url))
                     .ok();
             }
             MessageToUi::BrowsersUpdated(browsers) => {
-                self.state.browsers = Arc::new(browsers);
+                let browsers = Arc::new(browsers);
+                self.state.browsers = browsers.clone();
                 self.state.filtered_browsers =
                     Arc::new(get_filtered_browsers(&self.state.url, &self.state.browsers));
-                self.resize_picker(window);
+                if let Some(handle) = self.picker_window
+                    && handle
+                        .update(cx, |picker, window, cx| {
+                            picker.state.browsers = browsers;
+                            picker.state.filtered_browsers = Arc::new(get_filtered_browsers(
+                                &picker.state.url,
+                                &picker.state.browsers,
+                            ));
+                            picker.resize_picker(window);
+                            cx.notify();
+                        })
+                        .is_err()
+                {
+                    self.picker_window = None;
+                }
+                if let Some(window) = window.as_deref_mut() {
+                    self.resize_picker(window);
+                }
                 cx.notify();
             }
             MessageToUi::HiddenBrowsersUpdated(browsers) => {
-                self.state.restorable_app_profiles = Arc::new(browsers);
+                let browsers = Arc::new(browsers);
+                self.state.restorable_app_profiles = browsers.clone();
+                if let Some(handle) = self.picker_window
+                    && handle
+                        .update(cx, |picker, _, cx| {
+                            picker.state.restorable_app_profiles = browsers;
+                            cx.notify();
+                        })
+                        .is_err()
+                {
+                    self.picker_window = None;
+                }
                 cx.notify();
             }
         }
@@ -582,14 +792,15 @@ impl BrowserApp {
     }
 
     fn show_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(handle) = self.settings_window {
+        let settings_window = self.auxiliary_window_handles.borrow().settings;
+        if let Some(handle) = settings_window {
             if handle
                 .update(cx, |_, window, _| window.activate_window())
                 .is_ok()
             {
                 return;
             }
-            self.settings_window = None;
+            self.auxiliary_window_handles.borrow_mut().settings = None;
         }
 
         let state = self.state.clone();
@@ -597,6 +808,7 @@ impl BrowserApp {
         let unwrap_urls = self.unwrap_urls.clone();
         let settings_updates_sender = self.settings_updates_sender.clone();
         let auxiliary_windows = self.auxiliary_windows.clone();
+        let auxiliary_window_handles = self.auxiliary_window_handles.clone();
         let bounds = Bounds::centered(
             window.display(cx).map(|display| display.id()),
             size(px(SETTINGS_WIDTH), px(SETTINGS_HEIGHT)),
@@ -627,6 +839,8 @@ impl BrowserApp {
                         Screen::Settings,
                         settings_updates_sender,
                         auxiliary_windows,
+                        auxiliary_window_handles,
+                        false,
                         window,
                         cx,
                     )
@@ -635,7 +849,7 @@ impl BrowserApp {
             },
         ) {
             Ok(handle) => {
-                self.settings_window = Some(handle.into());
+                self.auxiliary_window_handles.borrow_mut().settings = Some(handle.into());
                 if self.persistent {
                     self.dismiss_picker(window, cx);
                 } else if self.is_layer_shell {
@@ -650,14 +864,15 @@ impl BrowserApp {
     }
 
     fn show_about(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(handle) = self.about_window {
+        let about_window = self.auxiliary_window_handles.borrow().about;
+        if let Some(handle) = about_window {
             if handle
                 .update(cx, |_, window, _| window.activate_window())
                 .is_ok()
             {
                 return;
             }
-            self.about_window = None;
+            self.auxiliary_window_handles.borrow_mut().about = None;
         }
 
         let state = self.state.clone();
@@ -665,6 +880,7 @@ impl BrowserApp {
         let unwrap_urls = self.unwrap_urls.clone();
         let settings_updates_sender = self.settings_updates_sender.clone();
         let auxiliary_windows = self.auxiliary_windows.clone();
+        let auxiliary_window_handles = self.auxiliary_window_handles.clone();
         let bounds = Bounds::centered(
             window.display(cx).map(|display| display.id()),
             size(px(ABOUT_WIDTH), px(ABOUT_HEIGHT)),
@@ -697,6 +913,8 @@ impl BrowserApp {
                         Screen::About,
                         settings_updates_sender,
                         auxiliary_windows,
+                        auxiliary_window_handles,
+                        false,
                         window,
                         cx,
                     )
@@ -705,7 +923,7 @@ impl BrowserApp {
             },
         ) {
             Ok(handle) => {
-                self.about_window = Some(handle.into());
+                self.auxiliary_window_handles.borrow_mut().about = Some(handle.into());
                 if self.persistent {
                     self.dismiss_picker(window, cx);
                 } else if self.is_layer_shell {
@@ -1158,9 +1376,6 @@ impl BrowserApp {
 
         match placement {
             PickerPlacement::Waiting => overlay
-                .flex()
-                .items_center()
-                .justify_center()
                 .child(
                     gpui::div()
                         .opacity(0.0)
@@ -2017,28 +2232,7 @@ fn picker_origin(
     )
 }
 
-fn centered_picker_origin(viewport: Size<Pixels>, picker: Size<Pixels>) -> Point<Pixels> {
-    let margin = px(PICKER_SCREEN_MARGIN);
-    let max_x = viewport.width - picker.width - margin;
-    let max_y = viewport.height - picker.height - margin;
-    let centered_x = px((f32::from(viewport.width) - f32::from(picker.width)) / 2.0);
-    let centered_y = px((f32::from(viewport.height) - f32::from(picker.height)) / 2.0);
-
-    gpui::point(
-        if max_x < margin {
-            px(0.0)
-        } else {
-            clamp_pixels(centered_x, margin, max_x)
-        },
-        if max_y < margin {
-            px(0.0)
-        } else {
-            clamp_pixels(centered_y, margin, max_y)
-        },
-    )
-}
-
-fn should_use_layer_shell() -> bool {
+fn is_wayland_session() -> bool {
     #[cfg(target_os = "linux")]
     {
         gpui::guess_compositor() == "Wayland"
@@ -2052,10 +2246,12 @@ fn should_use_layer_shell() -> bool {
 
 fn picker_window_options(
     state: &UIState,
-    use_layer_shell: bool,
+    placement: PickerWindowPlacement,
     persistent: bool,
+    activation_token: Option<String>,
     cx: &App,
 ) -> WindowOptions {
+    let use_layer_shell = placement == PickerWindowPlacement::PointerProbe;
     let bounds = Bounds::centered(None, picker_size(state), cx);
     let mut options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
@@ -2068,6 +2264,8 @@ fn picker_window_options(
         app_id: Some("software.Browsers".to_string()),
         window_min_size: Some(size(px(PICKER_WIDTH), px(PICKER_CHROME_HEIGHT))),
         window_decorations: Some(WindowDecorations::Client),
+        open_under_cursor: placement == PickerWindowPlacement::UnderCursor,
+        activation_token,
         ..Default::default()
     };
 
@@ -2109,10 +2307,10 @@ fn open_picker_window(
     main_sender: Sender<MessageToMain>,
     ui_receiver: Rc<RefCell<Option<UiReceiver<MessageToUi>>>>,
     unwrap_urls: Arc<AtomicBool>,
-    use_layer_shell: bool,
+    placement: PickerWindowPlacement,
     persistent: bool,
 ) -> anyhow::Result<()> {
-    let options = picker_window_options(&state, use_layer_shell, persistent, cx);
+    let options = picker_window_options(&state, placement, persistent, None, cx);
     cx.open_window(options, move |window, cx| {
         let ui_receiver = ui_receiver
             .borrow_mut()
@@ -2124,7 +2322,7 @@ fn open_picker_window(
                 main_sender,
                 ui_receiver,
                 unwrap_urls,
-                use_layer_shell,
+                placement == PickerWindowPlacement::PointerProbe,
                 persistent,
                 window,
                 cx,
@@ -2147,9 +2345,15 @@ pub fn run(
     let open_url_flag = unwrap_urls.clone();
     let open_url_sender = main_sender.clone();
 
-    let application = gpui_platform::application().with_assets(AppAssets {
-        component_assets: ComponentAssets,
-    });
+    let application = gpui_platform::application()
+        .with_assets(AppAssets {
+            component_assets: ComponentAssets,
+        })
+        .with_quit_mode(if persistent {
+            QuitMode::Explicit
+        } else {
+            QuitMode::LastWindowClosed
+        });
     application.on_open_urls(move |urls| {
         for url in urls {
             open_url_sender
@@ -2167,45 +2371,78 @@ pub fn run(
     application.run(move |cx| {
         gpui_component::init(cx);
         apply_theme(state.ui_settings.visual_settings.theme, None, cx);
-        cx.on_window_closed(|cx, _| {
-            if cx.windows().is_empty() {
-                cx.quit();
+
+        if persistent {
+            let ui_receiver = Rc::new(RefCell::new(Some(ui_receiver)));
+            if let Err(error) = open_picker_window(
+                cx,
+                state.clone(),
+                main_sender.clone(),
+                ui_receiver.clone(),
+                unwrap_urls.clone(),
+                PickerWindowPlacement::PointerProbe,
+                true,
+            ) {
+                warn!("Layer-shell daemon host unavailable, using headless daemon: {error}");
+                let ui_receiver = ui_receiver
+                    .borrow_mut()
+                    .take()
+                    .expect("daemon UI receiver was already consumed");
+                let app = cx.new(|cx| {
+                    BrowserApp::new_daemon(state, main_sender, ui_receiver, unwrap_urls, cx)
+                });
+                cx.set_global(DaemonApp { _app: app });
             }
-        })
-        .detach();
+            return;
+        }
 
         let ui_receiver = Rc::new(RefCell::new(Some(ui_receiver)));
-        let use_layer_shell = should_use_layer_shell();
-        let result = open_picker_window(
-            cx,
-            state.clone(),
-            main_sender.clone(),
-            ui_receiver.clone(),
-            unwrap_urls.clone(),
-            use_layer_shell,
-            persistent,
-        );
-        if let Err(error) = result {
-            if !use_layer_shell {
-                panic!("could not open Browsers window: {error}");
-            }
-            if persistent {
-                panic!("persistent picker requires layer-shell support: {error}");
-            }
-            warn!("Layer-shell picker unavailable, using a normal popup: {error}");
+        let result = if is_wayland_session() {
+            open_picker_window(
+                cx,
+                state.clone(),
+                main_sender.clone(),
+                ui_receiver.clone(),
+                unwrap_urls.clone(),
+                PickerWindowPlacement::UnderCursor,
+                false,
+            )
+            .or_else(|error| {
+                info!("Plasma cursor placement unavailable, using pointer probe: {error}");
+                open_picker_window(
+                    cx,
+                    state.clone(),
+                    main_sender.clone(),
+                    ui_receiver.clone(),
+                    unwrap_urls.clone(),
+                    PickerWindowPlacement::PointerProbe,
+                    false,
+                )
+            })
+            .or_else(|error| {
+                warn!("Layer-shell pointer probe unavailable, using compositor placement: {error}");
+                open_picker_window(
+                    cx,
+                    state,
+                    main_sender,
+                    ui_receiver,
+                    unwrap_urls,
+                    PickerWindowPlacement::Default,
+                    false,
+                )
+            })
+        } else {
             open_picker_window(
                 cx,
                 state,
                 main_sender,
                 ui_receiver,
                 unwrap_urls,
+                PickerWindowPlacement::Default,
                 false,
-                persistent,
             )
-            .expect("could not open Browsers fallback window");
-        }
-        if !persistent {
-            cx.activate(true);
-        }
+        };
+        result.expect("could not open Browsers picker window");
+        cx.activate(true);
     });
 }
