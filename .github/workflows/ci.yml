@@ -3,7 +3,6 @@ run-name: CI Build
 on: [ push ]
 jobs:
   build-linux:
-    environment: PROD_2028
     runs-on: ubuntu-latest
     env:
       CROSS_NO_WARNINGS: 0
@@ -69,8 +68,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
             ${{ runner.os }}-cargo-
-      - name: Install signify
-        run: cargo install signify --target-dir ./target/signify
       - name: Install cross
         # cargo install does check if dependency already exists,
         # but there's some conflict with github cache about it, so checking manually
@@ -85,17 +82,11 @@ jobs:
         run: |
           CROSS_BUILD_OPTS="--builder ${{ steps.buildx.outputs.name }} --cache-from type=gha,scope=armv7 --cache-to type=gha,scope=armv7,mode=max" cross build --target armv7-unknown-linux-gnueabihf --release
       - name: Build binaries and package
-        if: github.ref == 'refs/heads/main'
-        env:
-          APPCAST_SECRET_KEY_BASE64: ${{ secrets.APPCAST_SECRET_KEY_BASE64 }}
-        run: |
-          mkdir -p secrets
-          echo $APPCAST_SECRET_KEY_BASE64 | base64 --decode > secrets/appcast_seckey
-          export APPCAST_SECRET_KEY_FILE="${GITHUB_WORKSPACE}/secrets/appcast_seckey"
-          ./build-linux.sh
+        if: github.ref_type == 'tag'
+        run: ./build-linux.sh
         shell: bash
       - name: Test installer
-        if: github.ref == 'refs/heads/main'
+        if: github.ref_type == 'tag'
         run: |
           # desktop-file-utils is required for running install.sh (desktop-file-install and update-desktop-database)
           sudo apt-get install -y --no-install-recommends desktop-file-utils
@@ -105,7 +96,7 @@ jobs:
           ./install.sh
         shell: bash
       - name: End-to-end test - run Browsers
-        if: github.ref == 'refs/heads/main'
+        if: github.ref_type == 'tag'
         run: |
           install_dir="$HOME/.local/bin"
           cd "$install_dir"
@@ -142,17 +133,15 @@ jobs:
           fi
         shell: bash
       - name: Upload release artifact
-        if: github.ref == 'refs/heads/main'
+        if: github.ref_type == 'tag'
         uses: actions/upload-artifact@v7
         with:
           name: browsers-linux-artifacts
           path: |
             target/universal-unknown-linux-gnu/release/browsers_linux.tar.gz
             target/universal-unknown-linux-gnu/release/browsers_linux.tar.gz.sha256
-            target/universal-unknown-linux-gnu/release/browsers_linux.tar.gz.sig
             target/universal-unknown-linux-gnu/release/browsers_linux.tar.xz
             target/universal-unknown-linux-gnu/release/browsers_linux.tar.xz.sha256
-            target/universal-unknown-linux-gnu/release/browsers_linux.tar.xz.sig
             target/universal-unknown-linux-gnu/release/x86_64/browsers_amd64.deb
             target/universal-unknown-linux-gnu/release/aarch64/browsers_arm64.deb
             target/universal-unknown-linux-gnu/release/armv7l/browsers_armhf.deb
@@ -160,7 +149,6 @@ jobs:
             target/universal-unknown-linux-gnu/release/aarch64/browsers.aarch64.rpm
             target/universal-unknown-linux-gnu/release/armv7l/browsers.armhfp.rpm
   build-macos:
-    environment: PROD_2028
     runs-on: macos-15
     steps:
       - name: Check out repository code
@@ -182,10 +170,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
             ${{ runner.os }}-cargo-
-      - name: Install signify
-        run: cargo install signify --target-dir ./target/signify
-      - name: Install apple-codesign
-        run: cargo install apple-codesign --target-dir ./target/apple-codesign
       - name: Add Rust targets
         run: |
           rustup target add x86_64-apple-darwin
@@ -205,26 +189,12 @@ jobs:
           rm -rf target/universal-apple-darwin/release/
           mkdir -p target/universal-apple-darwin/release/
           lipo -create -output target/universal-apple-darwin/release/Browsers target/x86_64-apple-darwin/release/browsers target/aarch64-apple-darwin/release/browsers
-      - name: Build with signing
-        if: github.ref == 'refs/heads/main'
-        env:
-          APPLE_DEVELOPER_ID_APP_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_APP_P12 }}
-          P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_APP_P12_PASSWORD }}
-          APP_STORE_CONNECT_JSON: ${{ secrets.APP_STORE_CONNECT_JSON }}
-          APPCAST_SECRET_KEY_BASE64: ${{ secrets.APPCAST_SECRET_KEY_BASE64 }}
-        run: |
-          mkdir -p secrets
-          echo $APPLE_DEVELOPER_ID_APP_P12_BASE64 | base64 --decode > secrets/DeveloperIDApplication.p12
-          export P12_FILE="${GITHUB_WORKSPACE}/secrets/DeveloperIDApplication.p12"
-          echo $APPCAST_SECRET_KEY_BASE64 | base64 --decode > secrets/appcast_seckey
-          export APPCAST_SECRET_KEY_FILE="${GITHUB_WORKSPACE}/secrets/appcast_seckey"
-          echo $APP_STORE_CONNECT_JSON > secrets/app_store_connect.json
-          export NOTARY_API_KEY_JSON_FILE="${GITHUB_WORKSPACE}/secrets/app_store_connect.json"
-          echo "1. P12_FILE=$P12_FILE"
-          ./build-mac.sh
+      - name: Build binaries and package
+        if: github.ref_type == 'tag'
+        run: ./build-mac.sh
         shell: bash
       - name: Test app dir
-        if: github.ref == 'refs/heads/main'
+        if: github.ref_type == 'tag'
         run: |
           target_dir='target/universal-apple-darwin/release'
           cd "$target_dir"
@@ -234,7 +204,7 @@ jobs:
           ls -altrh ./Contents/Resources/
         shell: bash
       - name: End-to-end test - run Browsers
-        if: github.ref == 'refs/heads/main'
+        if: github.ref_type == 'tag'
         run: |
           target_dir='target/universal-apple-darwin/release'
           cd "$target_dir"
@@ -274,7 +244,7 @@ jobs:
         # special shell script to make tty working
         shell: 'script -q /dev/null bash -e {0}'
       - name: Upload mac artifacts
-        if: github.ref == 'refs/heads/main'
+        if: github.ref_type == 'tag'
         uses: actions/upload-artifact@v7
         with:
           name: browsers-mac-artifacts
@@ -282,12 +252,9 @@ jobs:
             target/universal-apple-darwin/release/Browsers.dmg
             target/universal-apple-darwin/release/browsers_mac.tar.gz
             target/universal-apple-darwin/release/browsers_mac.tar.gz.sha256
-            target/universal-apple-darwin/release/browsers_mac.tar.gz.sig
             target/universal-apple-darwin/release/browsers_mac.tar.xz
             target/universal-apple-darwin/release/browsers_mac.tar.xz.sha256
-            target/universal-apple-darwin/release/browsers_mac.tar.xz.sig
   build-windows:
-    environment: PROD_2028
     runs-on: windows-latest
     steps:
       - name: Check out repository code
@@ -309,8 +276,6 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
             ${{ runner.os }}-cargo-
-      - name: Install signify
-        run: cargo install signify --target-dir ./target/signify
       - name: Add Rust targets
         run: |
           rustup target add x86_64-pc-windows-msvc
@@ -324,7 +289,7 @@ jobs:
           cargo build --target aarch64-pc-windows-msvc --release
         shell: bash
       - name: Install tools
-        if: github.ref == 'refs/heads/main'
+        if: github.ref_type == 'tag'
         run: |
           curl https://raw.githubusercontent.com/Browsers-software/ci-utils/main/zip/bzip2.dll -o bzip2.dll
           curl https://raw.githubusercontent.com/Browsers-software/ci-utils/main/zip/zip.exe -o zip.exe
@@ -332,17 +297,11 @@ jobs:
           cp zip.exe "C:\Program Files\Git\mingw64\bin"
         shell: bash
       - name: Build binaries and package
-        if: github.ref == 'refs/heads/main'
-        env:
-          APPCAST_SECRET_KEY_BASE64: ${{ secrets.APPCAST_SECRET_KEY_BASE64 }}
-        run: |
-          mkdir -p secrets
-          echo $APPCAST_SECRET_KEY_BASE64 | base64 --decode > secrets/appcast_seckey
-          export APPCAST_SECRET_KEY_FILE="${GITHUB_WORKSPACE}/secrets/appcast_seckey"
-          ./build-windows.sh
+        if: github.ref_type == 'tag'
+        run: ./build-windows.sh
         shell: bash
       - name: Test installer
-        if: github.ref == 'refs/heads/main'
+        if: github.ref_type == 'tag'
         run: |
           target_dir='target/universal-pc-windows-msvc/release'
           cd "$target_dir"
@@ -350,7 +309,7 @@ jobs:
           ./install.bat --silent
         shell: bash
       - name: End-to-end test - run Browsers
-        if: github.ref == 'refs/heads/main'
+        if: github.ref_type == 'tag'
         run: |
           install_dir="$PROGRAMFILES/software.Browsers"
           cd "$install_dir"
@@ -393,7 +352,7 @@ jobs:
           fi
         shell: bash
       - name: Upload release artifact
-        if: github.ref == 'refs/heads/main'
+        if: github.ref_type == 'tag'
         uses: actions/upload-artifact@v7
         with:
           name: browsers-windows-artifacts
@@ -401,13 +360,13 @@ jobs:
             target/universal-pc-windows-msvc/release/Browsers_windows.zip
             target/universal-pc-windows-msvc/release/browsers_windows.tar.gz
             target/universal-pc-windows-msvc/release/browsers_windows.tar.gz.sha256
-            target/universal-pc-windows-msvc/release/browsers_windows.tar.gz.sig
             target/universal-pc-windows-msvc/release/browsers_windows.tar.xz
             target/universal-pc-windows-msvc/release/browsers_windows.tar.xz.sha256
-            target/universal-pc-windows-msvc/release/browsers_windows.tar.xz.sig
   release:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref_type == 'tag'
     needs: [ build-linux, build-macos, build-windows ]
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository code
@@ -438,10 +397,8 @@ jobs:
           files: |
             browsers-linux-artifacts/browsers_linux.tar.gz
             browsers-linux-artifacts/browsers_linux.tar.gz.sha256
-            browsers-linux-artifacts/browsers_linux.tar.gz.sig
             browsers-linux-artifacts/browsers_linux.tar.xz
             browsers-linux-artifacts/browsers_linux.tar.xz.sha256
-            browsers-linux-artifacts/browsers_linux.tar.xz.sig
             browsers-linux-artifacts/x86_64/browsers_amd64.deb
             browsers-linux-artifacts/aarch64/browsers_arm64.deb
             browsers-linux-artifacts/armv7l/browsers_armhf.deb
@@ -451,14 +408,10 @@ jobs:
             browsers-mac-artifacts/Browsers.dmg
             browsers-mac-artifacts/browsers_mac.tar.gz
             browsers-mac-artifacts/browsers_mac.tar.gz.sha256
-            browsers-mac-artifacts/browsers_mac.tar.gz.sig
             browsers-mac-artifacts/browsers_mac.tar.xz
             browsers-mac-artifacts/browsers_mac.tar.xz.sha256
-            browsers-mac-artifacts/browsers_mac.tar.xz.sig
             browsers-windows-artifacts/Browsers_windows.zip
             browsers-windows-artifacts/browsers_windows.tar.gz
             browsers-windows-artifacts/browsers_windows.tar.gz.sha256
-            browsers-windows-artifacts/browsers_windows.tar.gz.sig
             browsers-windows-artifacts/browsers_windows.tar.xz
             browsers-windows-artifacts/browsers_windows.tar.xz.sha256
-            browsers-windows-artifacts/browsers_windows.tar.xz.sig

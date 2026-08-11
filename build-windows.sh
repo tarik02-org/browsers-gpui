@@ -56,11 +56,9 @@ make_archives() {
 
     rm -f "./${target_dir:?}/browsers_windows.tar.gz"
     rm -f "./${target_dir:?}/browsers_windows.tar.gz.sha256"
-    rm -f "./${target_dir:?}/browsers_windows.tar.gz.sig"
 
     rm -f "./${target_dir:?}/browsers_windows.tar.xz"
     rm -f "./${target_dir:?}/browsers_windows.tar.xz.sha256"
-    rm -f "./${target_dir:?}/browsers_windows.tar.xz.sig"
 
     local filelist=(
       './x86_64/browsers.exe'
@@ -88,24 +86,20 @@ make_archives() {
     -C "./$target_dir" \
     "${filelist[@]}"
 
-  create_signatures "$target_dir" "browsers_windows.tar.gz"
+  create_checksum "$target_dir" "browsers_windows.tar.gz"
 
   tar -Jcf "./$target_dir/browsers_windows.tar.xz" \
     -C "./$target_dir" \
     "${filelist[@]}"
 
-  create_signatures "$target_dir" "browsers_windows.tar.xz"
+  create_checksum "$target_dir" "browsers_windows.tar.xz"
 }
 
-create_signatures() {
+create_checksum() {
   local target_dir="$1"
   local file_name="$2"
 
-  # creates $filename.sha256
-  certutil -hashfile packages.txt SHA256 | sed '2q;d' | sed -z "s/\n//g" > "./$target_dir/$file_name.sha256"
-
-  # creates $filename.sig
-  signify -S -s "$APPCAST_SECRET_KEY_FILE" -m "./$target_dir/$file_name"
+  certutil -hashfile "./$target_dir/$file_name" SHA256 | sed '2q;d' | tr -d '\r\n ' > "./$target_dir/$file_name.sha256"
 }
 
 build_binary
