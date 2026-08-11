@@ -3,11 +3,6 @@
 # exit when any command fails
 set -e
 
-# Load in some secrets
-if test -f .env; then
-  source .env
-fi
-
 target_dir='target/universal-apple-darwin/release'
 
 build_binary() {
@@ -48,22 +43,6 @@ build_app_bundle() {
   cp target/universal-apple-darwin/release/Browsers "$target_dir/Browsers.app/Contents/MacOS/Browsers"
 }
 
-sign_app_bundle() {
-  # Sign with hardened runtime (hardened runtime is required for notarization)
-  rcodesign sign \
-    --p12-file "$P12_FILE" \
-    --p12-password "$P12_PASSWORD" \
-    --code-signature-flags runtime \
-    "./$target_dir/Browsers.app"
-}
-
-notarize_app_bundle() {
-  rcodesign notary-submit \
-    --api-key-path "$NOTARY_API_KEY_JSON_FILE" \
-    --staple \
-    "./$target_dir/Browsers.app"
-}
-
 build_dmg() {
   # Build .dmg disk image installer
   cd extra/macos/dmg || exit
@@ -75,41 +54,33 @@ build_dmg() {
 make_archives() {
   rm -f "./${target_dir:?}/browsers_mac.tar.gz"
   rm -f "./${target_dir:?}/browsers_mac.tar.gz.sha256"
-  rm -f "./${target_dir:?}/browsers_mac.tar.gz.sig"
 
   rm -f "./${target_dir:?}/browsers_mac.tar.xz"
   rm -f "./${target_dir:?}/browsers_mac.tar.xz.sha256"
-  rm -f "./${target_dir:?}/browsers_mac.tar.xz.sig"
 
   # .tar.gz
   tar -zcf "./$target_dir/browsers_mac.tar.gz" \
     -C "./$target_dir" \
     ./Browsers.app
 
-  create_signatures "$target_dir" "browsers_mac.tar.gz"
+  create_checksum "$target_dir" "browsers_mac.tar.gz"
 
   # .tar.xz
   tar -Jcf "./$target_dir/browsers_mac.tar.xz" \
     -C "./$target_dir" \
     ./Browsers.app
 
-  create_signatures "$target_dir" "browsers_mac.tar.xz"
+  create_checksum "$target_dir" "browsers_mac.tar.xz"
 }
 
-create_signatures() {
+create_checksum() {
   local target_dir="$1"
   local file_name="$2"
 
-  # creates $filename.sha256
   shasum --algorithm 256 "./$target_dir/$file_name" | cut -f1 -d' ' > "./$target_dir/$file_name.sha256"
-
-  # creates $filename.sig
-  signify -S -s "$APPCAST_SECRET_KEY_FILE" -m "./$target_dir/$file_name"
 }
 
 build_binary
 build_app_bundle
-sign_app_bundle
-notarize_app_bundle
 build_dmg
 make_archives
