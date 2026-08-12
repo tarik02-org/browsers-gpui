@@ -4,7 +4,7 @@ version = "0.7.4"
 authors = ["Madis Liias <madisliias@gmail.com>"]
 edition = "2024"
 description = "Browsers"
-homepage = "https://browsers.software/"
+homepage = "https://github.com/tarik02-org/browsers-gpui"
 repository = "https://github.com/tarik02-org/browsers-gpui"
 license = "MIT OR Apache-2.0"
 build = "build.rs"
@@ -130,12 +130,12 @@ lto = true           # Enable Link Time Optimization
 # so update from main to specific version once released https://github.com/cross-rs/cross/pkgs/container/x86_64-unknown-linux-gnu/versions?filters%5Bversion_type%5D=tagged
 # Additionally install some libraries we need
 [package.metadata.cross.target.x86_64-unknown-linux-gnu]
-image = "browsers.software/x86_64-unknown-linux-gnu-gpui:local"
+image = "browsers-gpui/x86_64-unknown-linux-gnu:local"
 #image = "ghcr.io/cross-rs/x86_64-unknown-linux-gnu:main"
 
 [package.metadata.cross.target.aarch64-unknown-linux-gnu]
-image = "browsers.software/aarch64-unknown-linux-gnu-gpui:local"
+image = "browsers-gpui/aarch64-unknown-linux-gnu:local"
 #image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:main"
 
 [package.metadata.cross.target.armv7-unknown-linux-gnueabihf]
-image = "browsers.software/armv7-unknown-linux-gnueabihf-gpui:local"
+image = "browsers-gpui/armv7-unknown-linux-gnueabihf:local"

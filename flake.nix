@@ -18,6 +18,17 @@
         let
           pkgs = import nixpkgs { inherit system; };
           lib = pkgs.lib;
+          packageSource = lib.fileset.toSource {
+            root = ./.;
+            fileset = lib.fileset.unions [
+              ./Cargo.lock
+              ./Cargo.toml
+              ./build.rs
+              ./extra/linux
+              ./resources
+              ./src
+            ];
+          };
           runtimeLibraries = with pkgs; [
             fontconfig
             freetype
@@ -33,7 +44,7 @@
             pname = "browsers-gpui";
             version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
 
-            src = ./.;
+            src = packageSource;
 
             cargoLock = {
               lockFile = ./Cargo.lock;
@@ -98,7 +109,7 @@
             '';
 
             meta = {
-              homepage = "https://browsers.software/";
+              homepage = "https://github.com/tarik02-org/browsers-gpui";
               description = "Open the right browser at the right time";
               license = with lib.licenses; [
                 mit

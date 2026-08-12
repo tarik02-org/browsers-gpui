@@ -14,12 +14,13 @@
 
 Browsers is an intuitive context menu that pops up when you press a link in an app other than a web browser.
 
-**See our website for download links and instructions**<br>
-**https://browsers.software**
+![A link opens the Browsers profile picker.](docs/screenshots/picker.png)
 
-![Text with web link is shown.
-User clicks on the web link.
-Popover menu with list of browsers and browser profiles is shown that user can choose from.](docs/browsers.gif "Animated recording of our tool")
+<p align="center">
+  <a href="docs/screenshots/settings-general.png"><img src="docs/screenshots/settings-general.png" alt="General settings" width="32%" /></a>
+  <a href="docs/screenshots/settings-rules.png"><img src="docs/screenshots/settings-rules.png" alt="Opening-rule settings" width="32%" /></a>
+  <a href="docs/screenshots/settings-advanced.png"><img src="docs/screenshots/settings-advanced.png" alt="Advanced settings" width="32%" /></a>
+</p>
 
 ### Special Skills
 
@@ -55,13 +56,10 @@ environment.systemPackages = [
 ];
 ```
 
-Download for your platform
+Release archives are published on
+[GitHub](https://github.com/tarik02-org/browsers-gpui/releases/latest).
 
 - macOS
-  - To stay up with latest releases, install via homebrew:
-
-        brew install --cask browsers-software/tap/browsers
-
   - [**Browsers.dmg**](https://github.com/tarik02-org/browsers-gpui/releases/latest/download/Browsers.dmg) (Apple Silicon and Intel based Macs)
 - Linux
   - DEB package
@@ -77,10 +75,6 @@ Download for your platform
   - AUR - [browsers-bin](https://aur.archlinux.org/cgit/aur.git/tree/PKGBUILD?h=browsers-bin) and [browsers-git](https://aur.archlinux.org/cgit/aur.git/tree/PKGBUILD?h=browsers-git)
 - Windows - [**Browsers_windows.zip**](https://github.com/tarik02-org/browsers-gpui/releases/latest/download/Browsers_windows.zip) (x86_64 and arm64)
 
-## Social
-
-* [@BrowsersTweets](https://twitter.com/BrowsersTweets) on Twitter
-
 ## License
 
 Browsers is free and open source! All code in this repository is dual-licensed under either:
@@ -93,7 +87,3 @@ at your option. This means you can select the license you prefer!
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as
 defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
-
-## Supporters
-
-- JetBrains provides us a free open-source license for their IDEs

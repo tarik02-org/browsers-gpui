@@ -151,7 +151,6 @@ REG ADD "%RegistryRoot%\Software\Classes\software.Browsers\Application" /v AppUs
 REG ADD "%RegistryRoot%\Software\Classes\software.Browsers\Application" /v ApplicationIcon /t REG_SZ /d "%ProgramDir%\browsers.exe,0" /f 1>nul
 REG ADD "%RegistryRoot%\Software\Classes\software.Browsers\Application" /v ApplicationName /t REG_SZ /d "Browsers" /f 1>nul
 REG ADD "%RegistryRoot%\Software\Classes\software.Browsers\Application" /v ApplicationDescription /t REG_SZ /d "Open the right browser at the right time" /f 1>nul
-REG ADD "%RegistryRoot%\Software\Classes\software.Browsers\Application" /v ApplicationCompany /t REG_SZ /d "Browsers.software team" /f 1>nul
 
 REG ADD "%RegistryRoot%\Software\Classes\software.Browsers\DefaultIcon" /ve /d "%ProgramDir%\browsers.exe,0" /f 1>nul
 
@@ -184,7 +183,6 @@ REG ADD "%RegistryRoot%\Software\Microsoft\Windows\CurrentVersion\Uninstall\soft
 
 REG ADD "%RegistryRoot%\Software\Microsoft\Windows\CurrentVersion\Uninstall\software.Browsers" /v DisplayVersion /t REG_SZ /d "%APP_VERSION%" /f 1>nul
 REG ADD "%RegistryRoot%\Software\Microsoft\Windows\CurrentVersion\Uninstall\software.Browsers" /v EstimatedSize /t REG_DWORD /d 4800 /f 1>nul
-REG ADD "%RegistryRoot%\Software\Microsoft\Windows\CurrentVersion\Uninstall\software.Browsers" /v Publisher /t REG_SZ /d "Browsers.software" /f 1>nul
 
 if %is_local_install% == true (
   REG ADD "%RegistryRoot%\Software\Microsoft\Windows\CurrentVersion\Uninstall\software.Browsers" /v DisplayName /t REG_SZ /d "Browsers (Current User)" /f 1>nul

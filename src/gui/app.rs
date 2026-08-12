@@ -852,7 +852,7 @@ impl BrowserApp {
                 self.auxiliary_window_handles.borrow_mut().settings = Some(handle.into());
                 if self.persistent {
                     self.dismiss_picker(window, cx);
-                } else if self.is_layer_shell {
+                } else {
                     window.remove_window();
                 }
             }
@@ -926,7 +926,7 @@ impl BrowserApp {
                 self.auxiliary_window_handles.borrow_mut().about = Some(handle.into());
                 if self.persistent {
                     self.dismiss_picker(window, cx);
-                } else if self.is_layer_shell {
+                } else {
                     window.remove_window();
                 }
             }
@@ -1994,10 +1994,12 @@ impl BrowserApp {
                 h_flex()
                     .gap_2()
                     .child(
-                        Button::new("website")
-                            .label("browsers.software")
+                        Button::new("source-code")
+                            .label("Source code")
                             .outline()
-                            .on_click(|_, _, cx| cx.open_url("https://browsers.software")),
+                            .on_click(|_, _, cx| {
+                                cx.open_url("https://github.com/tarik02-org/browsers-gpui")
+                            }),
                     )
                     .child(
                         Button::new("about-close")

@@ -17,7 +17,7 @@ jobs:
         id: buildx
         uses: docker/setup-buildx-action@v4
         with:
-          install: true
+          use: true
       - name: Build cross builder image for x86_64
         uses: docker/build-push-action@v7
         with:
@@ -25,7 +25,7 @@ jobs:
           builder: ${{ steps.buildx.outputs.name }}
           file: cross/Dockerfile.linux_x86_64
           push: false
-          tags: browsers.software/x86_64-unknown-linux-gnu-gpui:local
+          tags: browsers-gpui/x86_64-unknown-linux-gnu:local
           cache-from: type=gha,scope=x86_64
           cache-to: type=gha,scope=x86_64,mode=max
           load: true # load the created image into docker, so cross can find it
@@ -36,7 +36,7 @@ jobs:
           builder: ${{ steps.buildx.outputs.name }}
           file: cross/Dockerfile.linux_aarch64
           push: false
-          tags: browsers.software/aarch64-unknown-linux-gnu-gpui:local
+          tags: browsers-gpui/aarch64-unknown-linux-gnu:local
           cache-from: type=gha,scope=aarch64
           cache-to: type=gha,scope=aarch64,mode=max
           load: true # load the created image into docker, so cross can find it
@@ -47,7 +47,7 @@ jobs:
           builder: ${{ steps.buildx.outputs.name }}
           file: cross/Dockerfile.linux_armv7
           push: false
-          tags: browsers.software/armv7-unknown-linux-gnueabihf-gpui:local
+          tags: browsers-gpui/armv7-unknown-linux-gnueabihf:local
           cache-from: type=gha,scope=armv7
           cache-to: type=gha,scope=armv7,mode=max
           load: true # load the created image into docker, so cross can find it
@@ -102,7 +102,7 @@ jobs:
           cd "$install_dir"
           #set -x
           
-          command_output="$(./browsers --no-gui https://browsers.software)"
+          command_output="$(./browsers --no-gui https://example.com)"
           echo "$command_output"
           
           failed=false
@@ -211,7 +211,7 @@ jobs:
           #set -x
 
           touch ./output_file
-          open ./Browsers.app -W --stdout output_file --stderr output_file --args --no-gui https://browsers.software
+          open ./Browsers.app -W --stdout output_file --stderr output_file --args --no-gui https://example.com
           
           command_output=`cat ./output_file`
           echo "$command_output"
@@ -315,7 +315,7 @@ jobs:
           cd "$install_dir"
           #set -x
           
-          command_output="$(./browsers.exe --no-gui https://browsers.software)"
+          command_output="$(./browsers.exe --no-gui https://example.com)"
           echo "$command_output"
           
           failed=false
