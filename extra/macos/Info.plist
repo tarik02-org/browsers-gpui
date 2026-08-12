@@ -85,7 +85,5 @@
         <key>LSApplicationCategoryType</key>
         <string>public.app-category.utilities</string>
 
-        <key>NSHumanReadableCopyright</key>
-        <string>© 2022-2024 Browsers.software.</string>
     </dict>
 </plist>

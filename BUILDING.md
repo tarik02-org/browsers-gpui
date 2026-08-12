@@ -47,6 +47,17 @@ another flake through `inputs.browsers-gpui.overlays.default` as
 GPUI uses Vulkan on Linux. A working Vulkan driver is required when running
 the application; both X11 and Wayland backends are enabled by default.
 
+## Regenerate the README screenshots
+
+The capture tool creates a disposable 2560×1440 KWin session at 2× scale,
+seeds fake browser profiles and opening rules, then captures the picker and
+every settings tab without touching the current desktop session:
+
+    nix run ./tools/readme-screenshots
+
+Use `--output-dir PATH` to write elsewhere, or `--keep-workdir` to retain the
+isolated session logs.
+
 ## Or build via docker image
 
     cargo install cross --git https://github.com/cross-rs/cross
