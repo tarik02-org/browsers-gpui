@@ -230,7 +230,7 @@ jobs:
 
       - name: Test installer
         run: |
-          sudo apt-get install -y --no-install-recommends desktop-file-utils
+          sudo apt-get install -y --no-install-recommends desktop-file-utils libxkbcommon-x11-0
           target_dir='target/universal-unknown-linux-gnu/release'
           cd "$target_dir"
           set -x
