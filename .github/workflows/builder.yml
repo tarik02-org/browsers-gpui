@@ -27,10 +27,13 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
+            image: x86_64-unknown-linux-gnu
             dockerfile: cross/Dockerfile.linux_x86_64
           - target: aarch64-unknown-linux-gnu
+            image: aarch64-unknown-linux-gnu
             dockerfile: cross/Dockerfile.linux_aarch64
           - target: armv7-unknown-linux-gnueabihf
+            image: armv7-unknown-linux-gnu
             dockerfile: cross/Dockerfile.linux_armv7
     steps:
       - name: Check out repository code
@@ -54,6 +57,6 @@ jobs:
           context: cross
           file: ${{ matrix.dockerfile }}
           push: true
-          tags: ghcr.io/${{ github.repository_owner }}/cross-${{ matrix.target }}-gpui:latest
+          tags: ghcr.io/${{ github.repository_owner }}/cross-${{ matrix.image }}-gpui:latest
           cache-from: type=gha,scope=cross-${{ matrix.target }}
           cache-to: type=gha,scope=cross-${{ matrix.target }},mode=max
