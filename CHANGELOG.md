@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Releases use `Y.M.DN` calendar versions, where `N` is the zero-based release
 number for that day.
 
+## 2026.8.1400 (2026-08-14)
+
+
+### Bug Fixes
+
+* **ci:** use calver for release pull requests ([#15](https://github.com/tarik02-org/browsers-gpui/issues/15)) ([24d6456](https://github.com/tarik02-org/browsers-gpui/commit/24d6456fcdaae38172c7f6bff90958b249b98fdb))
+
+
+### Build System
+
+* automate calendar releases ([#11](https://github.com/tarik02-org/browsers-gpui/issues/11)) ([79ac914](https://github.com/tarik02-org/browsers-gpui/commit/79ac914fc233a1d2199871b27c5d8d6e56820c84))
+* move packaging to cargo xtask ([#14](https://github.com/tarik02-org/browsers-gpui/issues/14)) ([e992212](https://github.com/tarik02-org/browsers-gpui/commit/e992212bee1a26734ae94a32eaf9a3c5c440fbe3))
+
+
+### Continuous Integration
+
+* speed up cross-platform builds ([#12](https://github.com/tarik02-org/browsers-gpui/issues/12)) ([afebb94](https://github.com/tarik02-org/browsers-gpui/commit/afebb94490dae072f3428a035b3cd73693479caf))
+
 ## [0.7.4] - 2026-08-09
 
 ### Added
