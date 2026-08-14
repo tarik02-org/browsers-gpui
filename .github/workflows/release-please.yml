@@ -29,9 +29,14 @@ jobs:
           fetch-depth: 0
           show-progress: false
 
+      - name: Restore xtask cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: xtask
+
       - name: Calculate next release version
         id: calver
-        run: echo "version=$(./tools/next_calver.sh)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(cargo xtask next-version)" >> "$GITHUB_OUTPUT"
         shell: bash
 
       - name: Create or update release pull request

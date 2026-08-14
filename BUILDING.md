@@ -1,11 +1,11 @@
-# Build Universal macOS binary
+# Build macOS packages
 
     rustup target add x86_64-apple-darwin
     rustup target add aarch64-apple-darwin
 
-    ./build-mac.sh
+    cargo xtask package macos
 
-# Build Linux binary
+# Build Linux packages
 
 ## Nix / NixOS
 
@@ -65,4 +65,11 @@ isolated session logs.
     cd cross
     ./build-cross-images.sh
     cd ..
-    ./build-linux.sh
+    cargo xtask package linux
+
+# Build Windows packages
+
+    rustup target add x86_64-pc-windows-msvc
+    rustup target add aarch64-pc-windows-msvc
+
+    cargo xtask package windows

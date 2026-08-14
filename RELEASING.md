@@ -25,6 +25,9 @@ an open release pull request each hour so its version follows the current date.
 The daily release number is derived from existing tags and supports values from
 `00` through `99`.
 
+Run `cargo xtask next-version` to calculate the same version locally. Set
+`RELEASE_TIMEZONE` to use another IANA timezone.
+
 The `bootstrap-sha` in `release-please-config.json` marks the last commit before
 release automation. Release Please uses it as the cutoff for the first generated
 changelog. The workflow does not create a tag at that commit.

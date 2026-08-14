@@ -27,6 +27,7 @@
               ./extra/linux
               ./resources
               ./src
+              ./xtask
             ];
           };
           runtimeLibraries = with pkgs; [

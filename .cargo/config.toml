@@ -1,3 +1,6 @@
+[alias]
+xtask = "run --package xtask --"
+
 [build]
 # Set explicit target while developing for platform other than host platform
 #target = "aarch64-pc-windows-msvc"
