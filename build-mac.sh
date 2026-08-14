@@ -5,7 +5,7 @@ set -e
 
 target_dir='target/universal-apple-darwin/release'
 
-build_binary() {
+compile_binaries() {
   # Set minimum macOS version to support older OS versions
   export MACOSX_DEPLOYMENT_TARGET=10.7
 
@@ -14,7 +14,9 @@ build_binary() {
 
   # Build ARM64 binary (also re-creates target/universal-apple-darwin/meta/Info.plist)
   cargo build --target aarch64-apple-darwin --release
+}
 
+assemble_binaries() {
   # Clean universal binary and app bundle
   rm -rf "${target_dir:?}/"
 
@@ -80,7 +82,10 @@ create_checksum() {
   shasum --algorithm 256 "./$target_dir/$file_name" | cut -f1 -d' ' > "./$target_dir/$file_name.sha256"
 }
 
-build_binary
+if [[ "${1:-}" != '--package-only' ]]; then
+  compile_binaries
+fi
+assemble_binaries
 build_app_bundle
 build_dmg
 make_archives

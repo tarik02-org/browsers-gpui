@@ -1,32 +1,62 @@
-name: Create builder Docker Image
-run-name: Create builder Docker Image
-on: workflow_dispatch
+name: Build cross images
+run-name: Build cross images
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/builder.yml
+      - cross/**
+  workflow_dispatch:
+
 permissions:
   contents: read
   packages: write
+
+concurrency:
+  group: cross-images
+  cancel-in-progress: true
+
 jobs:
-  create-images:
+  build:
+    name: Build ${{ matrix.target }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            image: x86_64-unknown-linux-gnu
+            dockerfile: cross/Dockerfile.linux_x86_64
+          - target: aarch64-unknown-linux-gnu
+            image: aarch64-unknown-linux-gnu
+            dockerfile: cross/Dockerfile.linux_aarch64
+          - target: armv7-unknown-linux-gnueabihf
+            image: armv7-unknown-linux-gnu
+            dockerfile: cross/Dockerfile.linux_armv7
     steps:
       - name: Check out repository code
         uses: actions/checkout@v7
         with:
           show-progress: false
-      - name: Login to GitHub Container Registry
+
+      - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build x86_64
-        run: |
-          docker build -t ghcr.io/${{ github.repository_owner }}/cross-x86_64-unknown-linux-gnu-gpui:latest - < cross/Dockerfile.linux_x86_64
-          docker push ghcr.io/${{ github.repository_owner }}/cross-x86_64-unknown-linux-gnu-gpui:latest
-      - name: Build aarch64
-        run: |
-          docker build -t ghcr.io/${{ github.repository_owner }}/cross-aarch64-unknown-linux-gnu-gpui:latest - < cross/Dockerfile.linux_aarch64
-          docker push ghcr.io/${{ github.repository_owner }}/cross-aarch64-unknown-linux-gnu-gpui:latest
-      - name: Build armv7
-        run: |
-          docker build -t ghcr.io/${{ github.repository_owner }}/cross-armv7-unknown-linux-gnu-gpui:latest - < cross/Dockerfile.linux_armv7
-          docker push ghcr.io/${{ github.repository_owner }}/cross-armv7-unknown-linux-gnu-gpui:latest
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and publish image
+        uses: docker/build-push-action@v7
+        with:
+          context: cross
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/cross-${{ matrix.image }}-gpui:latest
+          cache-from: type=gha,scope=cross-${{ matrix.target }}
+          cache-to: type=gha,scope=cross-${{ matrix.target }},mode=max

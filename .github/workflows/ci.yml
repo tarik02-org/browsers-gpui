@@ -1,141 +1,248 @@
 name: CI
 run-name: CI Build
+
 on:
   push:
   workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
 jobs:
   build-linux:
+    name: Build Linux (${{ matrix.target }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - armv7-unknown-linux-gnueabihf
     env:
+      CARGO_PROFILE_RELEASE_LTO: ${{ github.ref_type == 'tag' }}
       CROSS_NO_WARNINGS: 0
     steps:
       - name: Check out repository code
         uses: actions/checkout@v7
         with:
           show-progress: false
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
-      - name: Set up Docker Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
         with:
-          use: true
-      - name: Build cross builder image for x86_64
-        uses: docker/build-push-action@v7
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
         with:
-          context: ./cross/
-          builder: ${{ steps.buildx.outputs.name }}
-          file: cross/Dockerfile.linux_x86_64
-          push: false
-          tags: browsers-gpui/x86_64-unknown-linux-gnu:local
-          cache-from: type=gha,scope=x86_64
-          cache-to: type=gha,scope=x86_64,mode=max
-          load: true # load the created image into docker, so cross can find it
-      - name: Build cross builder image for aarch64
-        uses: docker/build-push-action@v7
-        with:
-          context: ./cross/
-          builder: ${{ steps.buildx.outputs.name }}
-          file: cross/Dockerfile.linux_aarch64
-          push: false
-          tags: browsers-gpui/aarch64-unknown-linux-gnu:local
-          cache-from: type=gha,scope=aarch64
-          cache-to: type=gha,scope=aarch64,mode=max
-          load: true # load the created image into docker, so cross can find it
-      - name: Build cross builder image for armv7
-        uses: docker/build-push-action@v7
-        with:
-          context: ./cross/
-          builder: ${{ steps.buildx.outputs.name }}
-          file: cross/Dockerfile.linux_armv7
-          push: false
-          tags: browsers-gpui/armv7-unknown-linux-gnueabihf:local
-          cache-from: type=gha,scope=armv7
-          cache-to: type=gha,scope=armv7,mode=max
-          load: true # load the created image into docker, so cross can find it
-      # even though we build inside a docker container via `cross`, then `cross` mounts
-      # target/
-      - name: Download cache
-        uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-            target/
-          key: ${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-            ${{ runner.os }}-cargo-
+          key: ${{ matrix.target }}
+
       - name: Install cross
-        # cargo install does check if dependency already exists,
-        # but there's some conflict with github cache about it, so checking manually
-        run: cargo install --list --target-dir ./target/cross | grep cross || cargo install --force cross --git https://github.com/cross-rs/cross --target-dir ./target/cross
-      - name: Test x86_64 binary
-        run: |
-          CROSS_BUILD_OPTS="--builder ${{ steps.buildx.outputs.name }} --cache-from type=gha,scope=x86_64 --cache-to type=gha,scope=x86_64,mode=max" cross build --target x86_64-unknown-linux-gnu --release
-      - name: Test aarch64 binaries
-        run: |
-          CROSS_BUILD_OPTS="--builder ${{ steps.buildx.outputs.name }} --cache-from type=gha,scope=aarch64 --cache-to type=gha,scope=aarch64,mode=max" cross build --target aarch64-unknown-linux-gnu --release
-      - name: Test armv7 binaries
-        run: |
-          CROSS_BUILD_OPTS="--builder ${{ steps.buildx.outputs.name }} --cache-from type=gha,scope=armv7 --cache-to type=gha,scope=armv7,mode=max" cross build --target armv7-unknown-linux-gnueabihf --release
-      - name: Build binaries and package
+        run: command -v cross || cargo install --force cross --git https://github.com/cross-rs/cross
+
+      - name: Build binary
+        run: cross build --target ${{ matrix.target }} --release
+
+      - name: Upload compiled binary
         if: github.ref_type == 'tag'
-        run: ./build-linux.sh
+        uses: actions/upload-artifact@v7
+        with:
+          name: compiled-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/browsers
+          if-no-files-found: error
+
+      - name: Upload package metadata
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v7
+        with:
+          name: metadata-${{ matrix.target }}
+          path: target/${{ matrix.target }}/meta
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS (${{ matrix.target }})
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-apple-darwin
+          - aarch64-apple-darwin
+    env:
+      CARGO_PROFILE_RELEASE_LTO: ${{ github.ref_type == 'tag' }}
+      MACOSX_DEPLOYMENT_TARGET: 10.7
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+        with:
+          show-progress: false
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build binary
+        run: cargo build --target ${{ matrix.target }} --release
+
+      - name: Upload compiled binary
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v7
+        with:
+          name: compiled-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/browsers
+          if-no-files-found: error
+
+      - name: Upload package metadata
+        if: github.ref_type == 'tag' && matrix.target == 'x86_64-apple-darwin'
+        uses: actions/upload-artifact@v7
+        with:
+          name: metadata-apple-darwin
+          path: target/universal-apple-darwin/meta
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows (${{ matrix.target }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-pc-windows-msvc
+          - aarch64-pc-windows-msvc
+    env:
+      CARGO_PROFILE_RELEASE_LTO: ${{ github.ref_type == 'tag' }}
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+        with:
+          show-progress: false
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build binary
+        run: cargo build --target ${{ matrix.target }} --release
+
+      - name: Upload compiled binary
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v7
+        with:
+          name: compiled-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/browsers.exe
+          if-no-files-found: error
+
+  package-linux:
+    name: Package Linux
+    if: github.ref_type == 'tag'
+    needs: build-linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+        with:
+          show-progress: false
+
+      - name: Download x86_64 binary
+        uses: actions/download-artifact@v8
+        with:
+          name: compiled-x86_64-unknown-linux-gnu
+          path: target/x86_64-unknown-linux-gnu/release
+
+      - name: Download x86_64 package metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: metadata-x86_64-unknown-linux-gnu
+          path: target/x86_64-unknown-linux-gnu/meta
+
+      - name: Download aarch64 binary
+        uses: actions/download-artifact@v8
+        with:
+          name: compiled-aarch64-unknown-linux-gnu
+          path: target/aarch64-unknown-linux-gnu/release
+
+      - name: Download aarch64 package metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: metadata-aarch64-unknown-linux-gnu
+          path: target/aarch64-unknown-linux-gnu/meta
+
+      - name: Download armv7 binary
+        uses: actions/download-artifact@v8
+        with:
+          name: compiled-armv7-unknown-linux-gnueabihf
+          path: target/armv7-unknown-linux-gnueabihf/release
+
+      - name: Download armv7 package metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: metadata-armv7-unknown-linux-gnueabihf
+          path: target/armv7-unknown-linux-gnueabihf/meta
+
+      - name: Build packages
+        run: ./build-linux.sh --package-only
         shell: bash
+
       - name: Test installer
-        if: github.ref_type == 'tag'
         run: |
-          # desktop-file-utils is required for running install.sh (desktop-file-install and update-desktop-database)
           sudo apt-get install -y --no-install-recommends desktop-file-utils
           target_dir='target/universal-unknown-linux-gnu/release'
           cd "$target_dir"
           set -x
           ./install.sh
         shell: bash
-      - name: End-to-end test - run Browsers
-        if: github.ref_type == 'tag'
+
+      - name: End-to-end test
         run: |
           install_dir="$HOME/.local/bin"
           cd "$install_dir"
-          #set -x
-          
           command_output="$(./browsers --no-gui https://example.com)"
           echo "$command_output"
-          
+
           failed=false
-          
           if echo "$command_output" | grep -q 'Firefox Web Browser'; then
-            echo "matched Firefox Web Browser"
+            echo 'matched Firefox Web Browser'
           else
-            echo "did NOT match Firefox Web Browser"
+            echo 'did NOT match Firefox Web Browser'
             failed=true
           fi
-          
+
           if echo "$command_output" | grep -q 'Google Chrome'; then
-            echo "matched Google Chrome"
+            echo 'matched Google Chrome'
           else
-            echo "did NOT match Google Chrome"
+            echo 'did NOT match Google Chrome'
             failed=true
           fi
-          
+
           if echo "$command_output" | grep -q 'Microsoft Edge'; then
-            echo "matched Microsoft Edge"
+            echo 'matched Microsoft Edge'
           else
-            echo "did NOT match Google Chrome"
+            echo 'did NOT match Microsoft Edge'
             failed=true
           fi
-          
+
           if [ "$failed" = true ]; then
             exit 1
           fi
         shell: bash
-      - name: Upload release artifact
-        if: github.ref_type == 'tag'
+
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v7
         with:
           name: browsers-linux-artifacts
@@ -150,103 +257,86 @@ jobs:
             target/universal-unknown-linux-gnu/release/x86_64/browsers.x86_64.rpm
             target/universal-unknown-linux-gnu/release/aarch64/browsers.aarch64.rpm
             target/universal-unknown-linux-gnu/release/armv7l/browsers.armhfp.rpm
-  build-macos:
+          if-no-files-found: error
+
+  package-macos:
+    name: Package macOS
+    if: github.ref_type == 'tag'
+    needs: build-macos
     runs-on: macos-15
     steps:
       - name: Check out repository code
         uses: actions/checkout@v7
         with:
           show-progress: false
-      - name: Download cache
-        uses: actions/cache@v6
+
+      - name: Download x86_64 binary
+        uses: actions/download-artifact@v8
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-            target/
-          key: ${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-            ${{ runner.os }}-cargo-
-      - name: Add Rust targets
-        run: |
-          rustup target add x86_64-apple-darwin
-          rustup target add aarch64-apple-darwin
-      - name: Test x86_64 binary
-        run: |
-          export MACOSX_DEPLOYMENT_TARGET=10.7
-          cargo build --target x86_64-apple-darwin --release
+          name: compiled-x86_64-apple-darwin
+          path: target/x86_64-apple-darwin/release
+
+      - name: Download aarch64 binary
+        uses: actions/download-artifact@v8
+        with:
+          name: compiled-aarch64-apple-darwin
+          path: target/aarch64-apple-darwin/release
+
+      - name: Download package metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: metadata-apple-darwin
+          path: target/universal-apple-darwin/meta
+
+      - name: Build packages
+        run: ./build-mac.sh --package-only
         shell: bash
-      - name: Test aarch64 binaries
+
+      - name: Test app directory
         run: |
-          export MACOSX_DEPLOYMENT_TARGET=10.7
-          cargo build --target aarch64-apple-darwin --release
-        shell: bash
-      - name: Build Universal Binary
-        run: |
-          rm -rf target/universal-apple-darwin/release/
-          mkdir -p target/universal-apple-darwin/release/
-          lipo -create -output target/universal-apple-darwin/release/Browsers target/x86_64-apple-darwin/release/browsers target/aarch64-apple-darwin/release/browsers
-      - name: Build binaries and package
-        if: github.ref_type == 'tag'
-        run: ./build-mac.sh
-        shell: bash
-      - name: Test app dir
-        if: github.ref_type == 'tag'
-        run: |
-          target_dir='target/universal-apple-darwin/release'
-          cd "$target_dir"
-          cd "./Browsers.app/"
-          set -x
+          cd target/universal-apple-darwin/release/Browsers.app
           ls -altrh .
           ls -altrh ./Contents/Resources/
         shell: bash
-      - name: End-to-end test - run Browsers
-        if: github.ref_type == 'tag'
+
+      - name: End-to-end test
         run: |
           target_dir='target/universal-apple-darwin/release'
           cd "$target_dir"
-          #set -x
-
           touch ./output_file
           open ./Browsers.app -W --stdout output_file --stderr output_file --args --no-gui https://example.com
-          
-          command_output=`cat ./output_file`
+
+          command_output="$(cat ./output_file)"
           echo "$command_output"
-          
+
           failed=false
           if echo "$command_output" | grep -q 'Safari'; then
-            echo "matched Safari"
+            echo 'matched Safari'
           else
-            echo "did NOT match Safari"
+            echo 'did NOT match Safari'
             failed=true
           fi
-          
+
           if echo "$command_output" | grep -q 'Chrome'; then
-            echo "matched Chrome"
+            echo 'matched Chrome'
           else
-            echo "did NOT match Chrome"
+            echo 'did NOT match Chrome'
             failed=true
           fi
-          
+
           if echo "$command_output" | grep -q 'Google Chrome for Testing'; then
-            echo "matched Google Chrome for Testing"
+            echo 'matched Google Chrome for Testing'
           else
-            echo "did NOT match Google Chrome for Testing"
+            echo 'did NOT match Google Chrome for Testing'
             failed=true
           fi
-          
+
           if [ "$failed" = true ]; then
             exit 1
           fi
-        # special shell script to make tty working
         shell: 'script -q /dev/null bash -e {0}'
-      - name: Upload mac artifacts
-        if: github.ref_type == 'tag'
+
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v7
         with:
           name: browsers-mac-artifacts
@@ -256,96 +346,83 @@ jobs:
             target/universal-apple-darwin/release/browsers_mac.tar.gz.sha256
             target/universal-apple-darwin/release/browsers_mac.tar.xz
             target/universal-apple-darwin/release/browsers_mac.tar.xz.sha256
-  build-windows:
+          if-no-files-found: error
+
+  package-windows:
+    name: Package Windows
+    if: github.ref_type == 'tag'
+    needs: build-windows
     runs-on: windows-latest
     steps:
       - name: Check out repository code
         uses: actions/checkout@v7
         with:
           show-progress: false
-      - name: Download cache
-        uses: actions/cache@v6
+
+      - name: Download x86_64 binary
+        uses: actions/download-artifact@v8
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-            target/
-          key: ${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-            ${{ runner.os }}-cargo-
-      - name: Add Rust targets
-        run: |
-          rustup target add x86_64-pc-windows-msvc
-          rustup target add aarch64-pc-windows-msvc
-      - name: Test x86_64 binary
-        run: |
-          cargo build --target x86_64-pc-windows-msvc --release
-        shell: bash
-      - name: Test aarch64 binary
-        run: |
-          cargo build --target aarch64-pc-windows-msvc --release
-        shell: bash
-      - name: Install tools
-        if: github.ref_type == 'tag'
+          name: compiled-x86_64-pc-windows-msvc
+          path: target/x86_64-pc-windows-msvc/release
+
+      - name: Download aarch64 binary
+        uses: actions/download-artifact@v8
+        with:
+          name: compiled-aarch64-pc-windows-msvc
+          path: target/aarch64-pc-windows-msvc/release
+
+      - name: Install packaging tools
         run: |
           curl https://raw.githubusercontent.com/Browsers-software/ci-utils/main/zip/bzip2.dll -o bzip2.dll
           curl https://raw.githubusercontent.com/Browsers-software/ci-utils/main/zip/zip.exe -o zip.exe
           cp bzip2.dll "C:\Program Files\Git\mingw64\bin"
           cp zip.exe "C:\Program Files\Git\mingw64\bin"
         shell: bash
-      - name: Build binaries and package
-        if: github.ref_type == 'tag'
-        run: ./build-windows.sh
+
+      - name: Build packages
+        run: ./build-windows.sh --package-only
         shell: bash
+
       - name: Test installer
-        if: github.ref_type == 'tag'
         run: |
-          target_dir='target/universal-pc-windows-msvc/release'
-          cd "$target_dir"
+          cd target/universal-pc-windows-msvc/release
           set -x
           ./install.bat --silent
         shell: bash
-      - name: End-to-end test - run Browsers
-        if: github.ref_type == 'tag'
+
+      - name: End-to-end test
         run: |
           install_dir="$PROGRAMFILES/software.Browsers"
           cd "$install_dir"
-          #set -x
-          
           command_output="$(./browsers.exe --no-gui https://example.com)"
           echo "$command_output"
-          
+
           failed=false
           if echo "$command_output" | grep -q 'Mozilla Firefox'; then
-            echo "matched Mozilla Firefox"
+            echo 'matched Mozilla Firefox'
           else
-            echo "did NOT match Mozilla Firefox"
+            echo 'did NOT match Mozilla Firefox'
             failed=true
           fi
-          
+
           if echo "$command_output" | grep -q 'Google Chrome'; then
-            echo "matched Google Chrome"
+            echo 'matched Google Chrome'
           else
-            echo "did NOT match Google Chrome"
+            echo 'did NOT match Google Chrome'
             failed=true
           fi
-          
+
           if echo "$command_output" | grep -q 'Internet Explorer'; then
-            echo "matched Internet Explorer"
+            echo 'matched Internet Explorer'
           else
-            echo "did NOT match Internet Explorer"
+            echo 'did NOT match Internet Explorer'
             failed=true
           fi
-          
+
           if echo "$command_output" | grep -q 'Microsoft Edge (Profile 1)'; then
-            echo "matched Microsoft Edge (Profile 1)"
+            echo 'matched Microsoft Edge (Profile 1)'
           else
-            echo "did NOT match Microsoft Edge (Profile 1)"
+            echo 'did NOT match Microsoft Edge (Profile 1)'
             failed=true
           fi
 
@@ -353,8 +430,8 @@ jobs:
             exit 1
           fi
         shell: bash
-      - name: Upload release artifact
-        if: github.ref_type == 'tag'
+
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v7
         with:
           name: browsers-windows-artifacts
@@ -364,9 +441,15 @@ jobs:
             target/universal-pc-windows-msvc/release/browsers_windows.tar.gz.sha256
             target/universal-pc-windows-msvc/release/browsers_windows.tar.xz
             target/universal-pc-windows-msvc/release/browsers_windows.tar.xz.sha256
+          if-no-files-found: error
+
   release:
+    name: Create GitHub release
     if: github.ref_type == 'tag'
-    needs: [ build-linux, build-macos, build-windows ]
+    needs:
+      - package-linux
+      - package-macos
+      - package-windows
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -375,19 +458,21 @@ jobs:
         uses: actions/checkout@v7
         with:
           show-progress: false
+
       - name: Download release artifacts
         uses: actions/download-artifact@v8
         with:
           pattern: browsers-*-artifacts
-      - name: Verify directories exist
+
+      - name: Verify artifact directories
         run: |
-          [ -e "browsers-linux-artifacts" ]
-          [ -e "browsers-mac-artifacts" ]
-          [ -e "browsers-windows-artifacts" ]
+          [ -e browsers-linux-artifacts ]
+          [ -e browsers-mac-artifacts ]
+          [ -e browsers-windows-artifacts ]
         shell: bash
-      - name: Release
+
+      - name: Upload release assets
         uses: softprops/action-gh-release@v3
-        if: github.ref_type == 'tag'
         with:
           fail_on_unmatched_files: true
           files: |

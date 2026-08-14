@@ -5,13 +5,15 @@ set -e
 
 target_dir='target/universal-unknown-linux-gnu/release'
 
-build_binary() {
+compile_binaries() {
   export CROSS_NO_WARNINGS=0
 
   cross build --target x86_64-unknown-linux-gnu --release
   cross build --target aarch64-unknown-linux-gnu --release
   cross build --target armv7-unknown-linux-gnueabihf --release
+}
 
+assemble_binaries() {
   # Clean universal binary
   rm -rf "${target_dir:?}/"
 
@@ -140,7 +142,10 @@ make_rpm_packages() {
   cp "target/armv7-unknown-linux-gnueabihf/release/browsers.armhfp.rpm" "$target_dir/armv7l/browsers.armhfp.rpm"
 }
 
-build_binary
+if [[ "${1:-}" != '--package-only' ]]; then
+  compile_binaries
+fi
+assemble_binaries
 build_app_bundle
 make_archives
 make_deb_packages

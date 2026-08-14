@@ -5,13 +5,15 @@ set -e
 
 target_dir='target/universal-pc-windows-msvc/release'
 
-build_binary() {
+compile_binaries() {
   # Build x86_64 binary
   cargo build --target x86_64-pc-windows-msvc --release
 
   # Build ARM64 binary
   cargo build --target aarch64-pc-windows-msvc --release
+}
 
+assemble_binaries() {
   # Clean universal binary and app bundle
   rm -rf "${target_dir:?}/"
 
@@ -102,6 +104,9 @@ create_checksum() {
   certutil -hashfile "./$target_dir/$file_name" SHA256 | sed '2q;d' | tr -d '\r\n ' > "./$target_dir/$file_name.sha256"
 }
 
-build_binary
+if [[ "${1:-}" != '--package-only' ]]; then
+  compile_binaries
+fi
+assemble_binaries
 build_app_bundle
 make_archives

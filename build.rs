@@ -40,6 +40,10 @@ fn copy_resources() {
 
 #[cfg(target_os = "macos")]
 fn main() {
+    println!("cargo:rerun-if-changed=resources/i18n/en-US/builtin.ftl");
+    println!("cargo:rerun-if-changed=resources/icons/512x512/software.Browsers.png");
+    println!("cargo:rerun-if-changed=resources/repository/application-repository.toml");
+    println!("cargo:rerun-if-changed=extra/macos/Info.plist");
     copy_resources();
 
     const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -75,6 +79,7 @@ fn main() {
 
 #[cfg(target_os = "windows")]
 fn main() {
+    println!("cargo:rerun-if-changed=extra/windows/icons/browsers.ico");
     let mut res = winres::WindowsResource::new();
     res.set_icon("extra/windows/icons/browsers.ico");
     res.compile().unwrap();
@@ -85,6 +90,9 @@ fn main() {
 
 #[cfg(target_os = "linux")]
 fn main() {
+    println!("cargo:rerun-if-changed=extra/linux/deb/DEBIAN/template.control");
+    println!("cargo:rerun-if-changed=extra/linux/rpm/SPECS/template.browsers.spec");
+
     // x86_64, aarch64, arm, i686
     // https://doc.rust-lang.org/reference/conditional-compilation.html#target_arch
     let rust_target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap();
