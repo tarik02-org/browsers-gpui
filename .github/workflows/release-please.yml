@@ -29,17 +29,6 @@ jobs:
           fetch-depth: 0
           show-progress: false
 
-      - name: Create release history baseline
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          if ! gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/0.7.4" >/dev/null 2>&1; then
-            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
-              --field ref='refs/tags/0.7.4' \
-              --field sha='17933477b66d1f448d957b3b168361de27062718'
-          fi
-        shell: bash
-
       - name: Calculate next release version
         id: calver
         run: echo "version=$(./tools/next_calver.sh)" >> "$GITHUB_OUTPUT"
