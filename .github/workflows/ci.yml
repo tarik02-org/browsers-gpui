@@ -471,14 +471,9 @@ jobs:
           [ -e browsers-windows-artifacts ]
         shell: bash
 
-      - name: Generate changelog
-        run: ./tools/extract_release_notes.sh ${{ github.ref_name }} CHANGELOG.md > ${{ github.workspace }}-RELEASE_NOTES.md
-        shell: bash
-
-      - name: Create release
+      - name: Upload release assets
         uses: softprops/action-gh-release@v3
         with:
-          body_path: ${{ github.workspace }}-RELEASE_NOTES.md
           fail_on_unmatched_files: true
           files: |
             browsers-linux-artifacts/browsers_linux.tar.gz
