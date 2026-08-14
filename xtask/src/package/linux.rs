@@ -5,8 +5,8 @@ use std::process::Command;
 use anyhow::{Context, Result};
 
 use super::{
-    ArchiveCompression, ICON_SIZES, copy_file, create_archive, create_symlink, reset_dir,
-    run_command, write_file,
+    ArchiveCompression, ICON_SIZES, copy_file, create_archive, create_symlink, make_executable,
+    reset_dir, run_command, write_file,
 };
 
 const RELEASE_DIR: &str = "target/universal-unknown-linux-gnu/release";
@@ -97,6 +97,7 @@ fn assemble_binaries(repo_root: &Path, release_dir: &Path) -> Result<()> {
                 .join("release/browsers"),
             &release_dir.join(target.output_dir).join("browsers"),
         )?;
+        make_executable(&release_dir.join(target.output_dir).join("browsers"))?;
     }
     Ok(())
 }
@@ -267,6 +268,7 @@ fn create_package_tree(repo_root: &Path, target_dir: &Path, package_root: &Path)
         &target_dir.join("release/browsers"),
         &data_dir.join("bin/browsers"),
     )?;
+    make_executable(&data_dir.join("bin/browsers"))?;
     create_symlink(
         Path::new("../share/software.Browsers/bin/browsers"),
         &package_root.join("usr/bin/browsers"),

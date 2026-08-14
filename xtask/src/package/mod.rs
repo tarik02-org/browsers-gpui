@@ -59,6 +59,26 @@ pub(super) fn copy_file(from: &Path, to: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
+pub(super) fn make_executable(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = fs::metadata(path)
+        .with_context(|| format!("failed to inspect {}", path.display()))?
+        .permissions();
+    permissions.set_mode(permissions.mode() | 0o111);
+    fs::set_permissions(path, permissions)
+        .with_context(|| format!("failed to make {} executable", path.display()))
+}
+
+#[cfg(not(unix))]
+pub(super) fn make_executable(path: &Path) -> Result<()> {
+    bail!(
+        "cannot set Unix executable permissions on this host: {}",
+        path.display()
+    )
+}
+
 pub(super) fn copy_dir(from: &Path, to: &Path) -> Result<()> {
     fs::create_dir_all(to).with_context(|| format!("failed to create {}", to.display()))?;
 

@@ -50,7 +50,7 @@ jobs:
           - aarch64-unknown-linux-gnu
           - armv7-unknown-linux-gnueabihf
     env:
-      CARGO_PROFILE_RELEASE_LTO: ${{ github.ref_type == 'tag' || inputs.package }}
+      CARGO_PROFILE_RELEASE_LTO: ${{ (github.ref_type == 'tag' || inputs.package) && 'true' || 'false' }}
       CROSS_NO_WARNINGS: 0
     steps:
       - name: Check out repository code
@@ -102,7 +102,7 @@ jobs:
           - x86_64-apple-darwin
           - aarch64-apple-darwin
     env:
-      CARGO_PROFILE_RELEASE_LTO: ${{ github.ref_type == 'tag' || inputs.package }}
+      CARGO_PROFILE_RELEASE_LTO: ${{ (github.ref_type == 'tag' || inputs.package) && 'true' || 'false' }}
       MACOSX_DEPLOYMENT_TARGET: 10.7
     steps:
       - name: Check out repository code
@@ -147,7 +147,7 @@ jobs:
           - x86_64-pc-windows-msvc
           - aarch64-pc-windows-msvc
     env:
-      CARGO_PROFILE_RELEASE_LTO: ${{ github.ref_type == 'tag' || inputs.package }}
+      CARGO_PROFILE_RELEASE_LTO: ${{ (github.ref_type == 'tag' || inputs.package) && 'true' || 'false' }}
     steps:
       - name: Check out repository code
         uses: actions/checkout@v7

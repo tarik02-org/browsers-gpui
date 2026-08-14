@@ -5,7 +5,7 @@ use anyhow::Result;
 
 use super::{
     ArchiveCompression, command_output, copy_dir, copy_file, create_archive, create_symlink,
-    remove_dir, remove_file, reset_dir, run_command, write_file,
+    make_executable, remove_dir, remove_file, reset_dir, run_command, write_file,
 };
 
 const RELEASE_DIR: &str = "target/universal-apple-darwin/release";
@@ -55,7 +55,8 @@ fn assemble_binary(repo_root: &Path, release_dir: &Path) -> Result<()> {
         .arg(repo_root.join("target/x86_64-apple-darwin/release/browsers"))
         .arg(repo_root.join("target/aarch64-apple-darwin/release/browsers"))
         .current_dir(repo_root);
-    run_command(&mut command)
+    run_command(&mut command)?;
+    make_executable(&release_dir.join("Browsers"))
 }
 
 fn assemble_app(repo_root: &Path, release_dir: &Path) -> Result<()> {
