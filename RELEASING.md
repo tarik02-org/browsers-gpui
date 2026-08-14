@@ -9,6 +9,9 @@ The release changelog comes from conventional commit types. Pull request titles
 must use a conventional type, for example `feat: add tab groups`, `fix: restore
 saved windows`, or `build: update the Linux package`. The supported types are
 `feat`, `fix`, `perf`, `refactor`, `docs`, `deps`, `build`, `ci`, and `chore`.
+The pull request title workflow enforces this format. Scopes such as
+`feat(tabs): add groups` and breaking changes such as `refactor!: remove legacy
+storage` are also valid.
 
 Versions use `Y.M.DN` calendar versioning. The patch component contains the day
 and a two-digit daily release number:

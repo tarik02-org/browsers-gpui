@@ -1,0 +1,34 @@
+name: Validate pull request title
+run-name: Validate pull request title
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - edited
+      - synchronize
+
+permissions:
+  pull-requests: read
+
+jobs:
+  validate-title:
+    name: Conventional title
+    runs-on: ubuntu-slim
+    steps:
+      - name: Validate title
+        uses: amannn/action-semantic-pull-request@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          types: |
+            feat
+            fix
+            perf
+            refactor
+            docs
+            deps
+            build
+            ci
+            chore
