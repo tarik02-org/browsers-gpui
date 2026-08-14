@@ -14,6 +14,26 @@ concurrency:
   cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 jobs:
+  check-xtask:
+    name: Check xtask
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+        with:
+          show-progress: false
+
+      - name: Restore xtask cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: xtask
+
+      - name: Check formatting
+        run: cargo fmt --package xtask -- --check
+
+      - name: Check xtask
+        run: cargo check --package xtask
+
   build-linux:
     name: Build Linux (${{ matrix.target }})
     runs-on: ubuntu-latest
@@ -159,6 +179,11 @@ jobs:
         with:
           show-progress: false
 
+      - name: Restore xtask cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: xtask
+
       - name: Download x86_64 binary
         uses: actions/download-artifact@v8
         with:
@@ -196,8 +221,7 @@ jobs:
           path: target/armv7-unknown-linux-gnueabihf/meta
 
       - name: Build packages
-        run: ./build-linux.sh --package-only
-        shell: bash
+        run: cargo xtask package linux --skip-build
 
       - name: Test installer
         run: |
@@ -270,6 +294,11 @@ jobs:
         with:
           show-progress: false
 
+      - name: Restore xtask cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: xtask
+
       - name: Download x86_64 binary
         uses: actions/download-artifact@v8
         with:
@@ -289,8 +318,7 @@ jobs:
           path: target/universal-apple-darwin/meta
 
       - name: Build packages
-        run: ./build-mac.sh --package-only
-        shell: bash
+        run: cargo xtask package macos --skip-build
 
       - name: Test app directory
         run: |
@@ -359,6 +387,11 @@ jobs:
         with:
           show-progress: false
 
+      - name: Restore xtask cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: xtask
+
       - name: Download x86_64 binary
         uses: actions/download-artifact@v8
         with:
@@ -380,8 +413,7 @@ jobs:
         shell: bash
 
       - name: Build packages
-        run: ./build-windows.sh --package-only
-        shell: bash
+        run: cargo xtask package windows --skip-build
 
       - name: Test installer
         run: |
