@@ -1,6 +1,8 @@
 name: CI
 run-name: CI Build
-on: [ push ]
+on:
+  push:
+  workflow_dispatch:
 jobs:
   build-linux:
     runs-on: ubuntu-latest
@@ -383,16 +385,10 @@ jobs:
           [ -e "browsers-mac-artifacts" ]
           [ -e "browsers-windows-artifacts" ]
         shell: bash
-      - name: Generate Changelog
-        if: github.ref_type == 'tag'
-        # Search from CHANGELOG.md for the changelog of the version (tag name)
-        run: ./tools/extract_release_notes.sh ${{ github.ref_name }} < CHANGELOG.md > ${{ github.workspace }}-RELEASE_NOTES.md
-        shell: bash
       - name: Release
         uses: softprops/action-gh-release@v3
         if: github.ref_type == 'tag'
         with:
-          body_path: ${{ github.workspace }}-RELEASE_NOTES.md
           fail_on_unmatched_files: true
           files: |
             browsers-linux-artifacts/browsers_linux.tar.gz

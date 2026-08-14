@@ -1,0 +1,63 @@
+name: Prepare release
+run-name: Prepare release
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          show-progress: false
+
+      - name: Calculate next release version
+        id: calver
+        run: echo "version=$(./tools/next_calver.sh)" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+      - name: Create or update release pull request
+        id: release
+        uses: googleapis/release-please-action@v5
+        with:
+          release-as: ${{ steps.calver.outputs.version }}
+
+      # Events created with GITHUB_TOKEN do not start other workflows. Dispatch
+      # CI explicitly so release pull requests still receive build checks.
+      - name: Run CI for release pull request
+        if: steps.release.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PR: ${{ steps.release.outputs.pr }}
+        run: |
+          head_branch="$(jq -r '.headBranchName' <<< "$RELEASE_PR")"
+          gh workflow run ci.yml --ref "$head_branch"
+        shell: bash
+
+      # Release Please creates the tag with GITHUB_TOKEN, so its push event is
+      # suppressed too. Run the existing artifact workflow at the new tag.
+      - name: Build release artifacts
+        if: steps.release.outputs.release_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ steps.release.outputs.tag_name }}
+        run: gh workflow run ci.yml --ref "$TAG_NAME"
+        shell: bash
