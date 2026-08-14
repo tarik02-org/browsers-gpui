@@ -34,28 +34,57 @@ jobs:
         with:
           key: xtask
 
-      - name: Calculate next release version
-        id: calver
-        run: echo "version=$(cargo xtask next-version)" >> "$GITHUB_OUTPUT"
-        shell: bash
-
-      - name: Create or update release pull request
+      - name: Create GitHub release
         id: release
         uses: googleapis/release-please-action@v5
         with:
-          release-as: ${{ steps.calver.outputs.version }}
+          skip-github-pull-request: true
+
+      - name: Fetch release tags
+        run: git fetch --force --tags
+
+      - name: Calculate next release version
+        id: calver
+        run: echo "version=$(cargo xtask next-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Find existing release pull request
+        id: previous-release-pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh pr list --base main --label 'autorelease: pending' --state open
+          --json headRefOid --jq '"head=\(.[0].headRefOid // "")"'
+          >> "$GITHUB_OUTPUT"
+
+      # The action ignores release-as in manifest mode. The CLI passes it to
+      # the package config while preserving the rest of the manifest config.
+      - name: Create or update release pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_AS: ${{ steps.calver.outputs.version }}
+        run: >-
+          npx --yes release-please@17.6.0 release-pr
+          --repo-url="$GITHUB_REPOSITORY" --token="$GH_TOKEN"
+          --release-as="$RELEASE_AS"
+
+      - name: Find updated release pull request
+        id: release-pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh pr list --base main --label 'autorelease: pending' --state open
+          --json headRefName,headRefOid
+          --jq '"branch=\(.[0].headRefName // "")\nhead=\(.[0].headRefOid // "")"'
+          >> "$GITHUB_OUTPUT"
 
       # Events created with GITHUB_TOKEN do not start other workflows. Dispatch
       # CI explicitly so release pull requests still receive build checks.
       - name: Run CI for release pull request
-        if: steps.release.outputs.prs_created == 'true'
+        if: steps.release-pr.outputs.head != '' && steps.release-pr.outputs.head != steps.previous-release-pr.outputs.head
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_PR: ${{ steps.release.outputs.pr }}
-        run: |
-          head_branch="$(jq -r '.headBranchName' <<< "$RELEASE_PR")"
-          gh workflow run ci.yml --ref "$head_branch"
-        shell: bash
+          RELEASE_BRANCH: ${{ steps.release-pr.outputs.branch }}
+        run: gh workflow run ci.yml --ref "$RELEASE_BRANCH"
 
       # Release Please creates the tag with GITHUB_TOKEN, so its push event is
       # suppressed too. Run the existing artifact workflow at the new tag.
