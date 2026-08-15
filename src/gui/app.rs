@@ -36,6 +36,9 @@ use crate::paths;
 use crate::utils::{BehavioralConfig, ConfiguredTheme};
 use crate::{MessageToMain, MessageToUi, MoveTo};
 
+#[cfg(target_os = "macos")]
+use crate::macos::status_item::{Action as StatusItemAction, StatusItem};
+
 #[path = "picker.rs"]
 mod picker;
 #[path = "settings.rs"]
@@ -198,9 +201,22 @@ pub struct BrowserApp {
 
 struct DaemonApp {
     _app: Entity<BrowserApp>,
+    #[cfg(target_os = "macos")]
+    _status_item: StatusItem,
 }
 
 impl Global for DaemonApp {}
+
+#[cfg(target_os = "macos")]
+impl BrowserApp {
+    fn handle_status_item_action(&mut self, action: StatusItemAction, cx: &mut Context<Self>) {
+        match action {
+            StatusItemAction::Settings => self.show_settings_from_status_item(cx),
+            StatusItemAction::Refresh => self.send(MessageToMain::Refresh),
+            StatusItemAction::Quit => cx.quit(),
+        }
+    }
+}
 
 impl BrowserApp {
     fn new_daemon(
@@ -613,14 +629,34 @@ pub fn run(
         if persistent {
             #[cfg(target_os = "macos")]
             {
+                use objc2::MainThreadMarker;
+                use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+
+                let main_thread =
+                    MainThreadMarker::new().expect("GPUI must run on the main thread");
+                NSApplication::sharedApplication(main_thread)
+                    .setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+
+                let (status_item, status_receiver) =
+                    StatusItem::new().expect("could not create status item");
                 let show_initial_picker = !state.url.is_empty();
                 let app = cx.new(|cx| {
                     BrowserApp::new_daemon(state, main_sender, ui_receiver, unwrap_urls, cx)
                 });
+                let status_app = app.clone();
+                cx.spawn(async move |cx| {
+                    while let Ok(action) = status_receiver.recv_async().await {
+                        status_app.update(cx, |app, cx| app.handle_status_item_action(action, cx));
+                    }
+                })
+                .detach();
                 if show_initial_picker {
                     app.update(cx, |app, cx| app.open_daemon_picker(None, cx));
                 }
-                cx.set_global(DaemonApp { _app: app });
+                cx.set_global(DaemonApp {
+                    _app: app,
+                    _status_item: status_item,
+                });
             }
 
             #[cfg(target_os = "linux")]

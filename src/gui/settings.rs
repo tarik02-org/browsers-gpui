@@ -35,12 +35,32 @@ impl BrowserApp {
         cx.notify();
     }
     pub(super) fn show_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let display_id = window.display(cx).map(|display| display.id());
+        self.open_settings(display_id, Some(window), false, cx);
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn show_settings_from_status_item(&mut self, cx: &mut Context<Self>) {
+        self.close_daemon_picker(cx);
+        self.open_settings(None, None, true, cx);
+    }
+
+    fn open_settings(
+        &mut self,
+        display_id: Option<gpui::DisplayId>,
+        origin_window: Option<&mut Window>,
+        activate_app: bool,
+        cx: &mut Context<Self>,
+    ) {
         let settings_window = self.auxiliary_window_handles.borrow().settings;
         if let Some(handle) = settings_window {
             if handle
                 .update(cx, |_, window, _| window.activate_window())
                 .is_ok()
             {
+                if activate_app {
+                    cx.activate(true);
+                }
                 return;
             }
             self.auxiliary_window_handles.borrow_mut().settings = None;
@@ -52,11 +72,8 @@ impl BrowserApp {
         let settings_updates_sender = self.settings_updates_sender.clone();
         let auxiliary_windows = self.auxiliary_windows.clone();
         let auxiliary_window_handles = self.auxiliary_window_handles.clone();
-        let bounds = Bounds::centered(
-            window.display(cx).map(|display| display.id()),
-            size(px(SETTINGS_WIDTH), px(SETTINGS_HEIGHT)),
-            cx,
-        );
+        let bounds =
+            Bounds::centered(display_id, size(px(SETTINGS_WIDTH), px(SETTINGS_HEIGHT)), cx);
         auxiliary_windows.fetch_add(1, Ordering::Relaxed);
 
         match cx.open_window(
@@ -92,10 +109,18 @@ impl BrowserApp {
             },
         ) {
             Ok(handle) => {
+                if activate_app {
+                    cx.activate(true);
+                }
+                handle
+                    .update(cx, |_, window, _| window.activate_window())
+                    .ok();
                 self.auxiliary_window_handles.borrow_mut().settings = Some(handle.into());
                 if self.persistent {
-                    self.dismiss_picker(window, cx);
-                } else {
+                    if let Some(window) = origin_window {
+                        self.dismiss_picker(window, cx);
+                    }
+                } else if let Some(window) = origin_window {
                     window.remove_window();
                 }
             }
