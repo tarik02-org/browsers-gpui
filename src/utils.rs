@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
@@ -57,6 +58,14 @@ pub struct Config {
     rules: Vec<ConfigRule>,
     ui: UIConfig,
     behavior: BehavioralConfig,
+    pub(crate) recent_profiles: RecentProfiles,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+#[serde(default)]
+pub struct RecentProfiles {
+    pub(crate) domains: BTreeMap<String, String>,
+    pub(crate) source_apps: BTreeMap<String, String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
