@@ -139,6 +139,7 @@ enum PickerSettingsUpdate {
     ShowHotkeys(bool),
     QuitOnLostFocus(bool),
     UnwrapUrls(bool),
+    StripTrackingParameters(bool),
 }
 
 struct RuleEditor {
@@ -179,6 +180,7 @@ pub struct BrowserApp {
     state: UIState,
     main_sender: Sender<MessageToMain>,
     unwrap_urls: Arc<AtomicBool>,
+    strip_tracking_parameters: Arc<AtomicBool>,
     screen: Screen,
     focus_handle: FocusHandle,
     rule_editors: Vec<RuleEditor>,
@@ -224,6 +226,7 @@ impl BrowserApp {
         main_sender: Sender<MessageToMain>,
         ui_receiver: UiReceiver<MessageToUi>,
         unwrap_urls: Arc<AtomicBool>,
+        strip_tracking_parameters: Arc<AtomicBool>,
         cx: &mut Context<Self>,
     ) -> Self {
         let (settings_updates_sender, settings_updates_receiver) = flume::unbounded();
@@ -256,6 +259,7 @@ impl BrowserApp {
             state,
             main_sender,
             unwrap_urls,
+            strip_tracking_parameters,
             screen: Screen::Picker,
             focus_handle,
             rule_editors: Vec::new(),
@@ -282,6 +286,7 @@ impl BrowserApp {
         main_sender: Sender<MessageToMain>,
         ui_receiver: UiReceiver<MessageToUi>,
         unwrap_urls: Arc<AtomicBool>,
+        strip_tracking_parameters: Arc<AtomicBool>,
         is_layer_shell: bool,
         persistent: bool,
         window: &mut Window,
@@ -343,6 +348,7 @@ impl BrowserApp {
             state,
             main_sender,
             unwrap_urls,
+            strip_tracking_parameters,
             screen: Screen::Picker,
             focus_handle,
             rule_editors: Vec::new(),
@@ -372,6 +378,7 @@ impl BrowserApp {
         state: UIState,
         main_sender: Sender<MessageToMain>,
         unwrap_urls: Arc<AtomicBool>,
+        strip_tracking_parameters: Arc<AtomicBool>,
         screen: Screen,
         settings_updates_sender: SettingsSender<PickerSettingsUpdate>,
         auxiliary_windows: Arc<AtomicUsize>,
@@ -414,6 +421,7 @@ impl BrowserApp {
             state,
             main_sender,
             unwrap_urls,
+            strip_tracking_parameters,
             screen,
             focus_handle,
             rule_editors,
@@ -457,12 +465,23 @@ impl BrowserApp {
             MessageToUi::BehaviorUpdated(behavior) => {
                 self.unwrap_urls
                     .store(behavior.unwrap_urls, Ordering::Relaxed);
+                self.strip_tracking_parameters
+                    .store(behavior.strip_tracking_parameters, Ordering::Relaxed);
                 self.state.ui_settings.behavioral_settings.unwrap_urls = behavior.unwrap_urls;
+                self.state
+                    .ui_settings
+                    .behavioral_settings
+                    .strip_tracking_parameters = behavior.strip_tracking_parameters;
                 if let Some(handle) = self.picker_window
                     && handle
                         .update(cx, |picker, _, cx| {
                             picker.state.ui_settings.behavioral_settings.unwrap_urls =
                                 behavior.unwrap_urls;
+                            picker
+                                .state
+                                .ui_settings
+                                .behavioral_settings
+                                .strip_tracking_parameters = behavior.strip_tracking_parameters;
                             cx.notify();
                         })
                         .is_err()
@@ -596,7 +615,14 @@ pub fn run(
     let unwrap_urls = Arc::new(AtomicBool::new(
         state.ui_settings.behavioral_settings.unwrap_urls,
     ));
+    let strip_tracking_parameters = Arc::new(AtomicBool::new(
+        state
+            .ui_settings
+            .behavioral_settings
+            .strip_tracking_parameters,
+    ));
     let open_url_flag = unwrap_urls.clone();
+    let open_url_strip_tracking_flag = strip_tracking_parameters.clone();
     let open_url_sender = main_sender.clone();
 
     let application = gpui_platform::application()
@@ -616,6 +642,8 @@ pub fn run(
                     url,
                     BehavioralConfig {
                         unwrap_urls: open_url_flag.load(Ordering::Relaxed),
+                        strip_tracking_parameters: open_url_strip_tracking_flag
+                            .load(Ordering::Relaxed),
                     },
                 ))
                 .ok();
@@ -641,7 +669,14 @@ pub fn run(
                     StatusItem::new().expect("could not create status item");
                 let show_initial_picker = !state.url.is_empty();
                 let app = cx.new(|cx| {
-                    BrowserApp::new_daemon(state, main_sender, ui_receiver, unwrap_urls, cx)
+                    BrowserApp::new_daemon(
+                        state,
+                        main_sender,
+                        ui_receiver,
+                        unwrap_urls,
+                        strip_tracking_parameters,
+                        cx,
+                    )
                 });
                 let status_app = app.clone();
                 cx.spawn(async move |cx| {
@@ -668,6 +703,7 @@ pub fn run(
                     main_sender.clone(),
                     ui_receiver.clone(),
                     unwrap_urls.clone(),
+                    strip_tracking_parameters.clone(),
                     PickerWindowPlacement::PointerProbe,
                     true,
                 ) {
@@ -677,7 +713,14 @@ pub fn run(
                         .take()
                         .expect("daemon UI receiver was already consumed");
                     let app = cx.new(|cx| {
-                        BrowserApp::new_daemon(state, main_sender, ui_receiver, unwrap_urls, cx)
+                        BrowserApp::new_daemon(
+                            state,
+                            main_sender,
+                            ui_receiver,
+                            unwrap_urls,
+                            strip_tracking_parameters,
+                            cx,
+                        )
                     });
                     cx.set_global(DaemonApp { _app: app });
                 }
@@ -693,6 +736,7 @@ pub fn run(
                 main_sender.clone(),
                 ui_receiver.clone(),
                 unwrap_urls.clone(),
+                strip_tracking_parameters.clone(),
                 PickerWindowPlacement::UnderCursor,
                 false,
             )
@@ -704,6 +748,7 @@ pub fn run(
                     main_sender.clone(),
                     ui_receiver.clone(),
                     unwrap_urls.clone(),
+                    strip_tracking_parameters.clone(),
                     PickerWindowPlacement::PointerProbe,
                     false,
                 )
@@ -716,6 +761,7 @@ pub fn run(
                     main_sender,
                     ui_receiver,
                     unwrap_urls,
+                    strip_tracking_parameters,
                     PickerWindowPlacement::Default,
                     false,
                 )
@@ -732,6 +778,7 @@ pub fn run(
                 main_sender,
                 ui_receiver,
                 unwrap_urls,
+                strip_tracking_parameters,
                 placement,
                 false,
             )

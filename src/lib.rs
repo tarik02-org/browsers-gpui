@@ -621,43 +621,87 @@ fn sort_browser_profiles(
 }
 
 pub fn unwrap_url(url_str: &str, behavioral_settings: &BehavioralConfig) -> String {
-    if !behavioral_settings.unwrap_urls {
-        return url_str.to_string();
-    }
-
     let url_maybe = Url::from_str(url_str).ok();
     if url_maybe.is_none() {
         return url_str.to_string();
     }
     let url = url_maybe.unwrap();
 
-    let transformed_url = url.domain().and_then(|domain| {
-        let domain_lowercase = domain.to_lowercase();
+    let unwrapped_url = if behavioral_settings.unwrap_urls {
+        let transformed_url = url.domain().and_then(|domain| {
+            let domain_lowercase = domain.to_lowercase();
 
-        return if domain_lowercase.ends_with("safelinks.protection.outlook.com") {
-            let query_pairs: Parse = url.query_pairs();
+            return if domain_lowercase.ends_with("safelinks.protection.outlook.com") {
+                let query_pairs: Parse = url.query_pairs();
 
-            let target_url_maybe: Option<String> = query_pairs
-                .into_iter()
-                .find(|(key, _)| key == "url")
-                .map(|(_, value)| value.to_string());
+                let target_url_maybe: Option<String> = query_pairs
+                    .into_iter()
+                    .find(|(key, _)| key == "url")
+                    .map(|(_, value)| value.to_string());
 
-            target_url_maybe
-        } else if domain_lowercase.ends_with("l.messenger.com") {
-            let query_pairs: Parse = url.query_pairs();
+                target_url_maybe
+            } else if domain_lowercase.ends_with("l.messenger.com") {
+                let query_pairs: Parse = url.query_pairs();
 
-            let target_url_maybe: Option<String> = query_pairs
-                .into_iter()
-                .find(|(key, _)| key == "u")
-                .map(|(_, value)| value.to_string());
+                let target_url_maybe: Option<String> = query_pairs
+                    .into_iter()
+                    .find(|(key, _)| key == "u")
+                    .map(|(_, value)| value.to_string());
 
-            target_url_maybe
-        } else {
-            None
-        };
-    });
+                target_url_maybe
+            } else {
+                None
+            };
+        });
 
-    return transformed_url.unwrap_or(url_str.to_string());
+        transformed_url.unwrap_or_else(|| url_str.to_string())
+    } else {
+        url_str.to_string()
+    };
+
+    if !behavioral_settings.strip_tracking_parameters {
+        return unwrapped_url;
+    }
+
+    let Ok(mut parsed_url) = Url::parse(unwrapped_url.as_str()) else {
+        return unwrapped_url;
+    };
+    if !matches!(parsed_url.scheme(), "http" | "https") {
+        return unwrapped_url;
+    }
+
+    let Some(query) = parsed_url.query() else {
+        return unwrapped_url;
+    };
+    let mut removed_parameter = false;
+    let kept_pairs: Vec<&str> = query
+        .split('&')
+        .filter(|pair| {
+            let key = pair.split_once('=').map_or(*pair, |(key, _)| key);
+            let decoded_key = url::form_urlencoded::parse(key.as_bytes())
+                .next()
+                .map(|(key, _)| key.to_ascii_lowercase())
+                .unwrap_or_default();
+            let should_remove = decoded_key.starts_with("utm_")
+                || matches!(
+                    decoded_key.as_str(),
+                    "fbclid" | "gclid" | "dclid" | "msclkid" | "mc_cid" | "mc_eid"
+                );
+            removed_parameter |= should_remove;
+            !should_remove
+        })
+        .collect();
+
+    if !removed_parameter {
+        return unwrapped_url;
+    }
+
+    if kept_pairs.is_empty() {
+        parsed_url.set_query(None);
+    } else {
+        parsed_url.set_query(Some(kept_pairs.join("&").as_str()));
+    }
+    parsed_url.to_string()
 }
 
 pub fn handle_messages_to_main(
@@ -704,10 +748,11 @@ pub fn handle_messages_to_main(
                     .get(profile_index);
                 let profile = option.unwrap();
 
+                let cleaned_url = unwrap_url(&url, behavioral_config);
                 let mut config = app_finder.load_config();
                 let profile_id = profile.get_unique_id();
                 let mut remembered = false;
-                if let Some(host) = url_host(url.as_str()) {
+                if let Some(host) = url_host(cleaned_url.as_str()) {
                     config
                         .recent_profiles
                         .domains
@@ -725,7 +770,7 @@ pub fn handle_messages_to_main(
                     app_finder.save_config(&config);
                 }
 
-                profile.open_link(url.as_str(), incognito_mode);
+                profile.open_link(cleaned_url.as_str(), incognito_mode);
                 ui_sender.send(MessageToUi::OpenLinkCompleted).ok();
             }
             MessageToMain::UrlOpenRequest(from_bundle_id, url, activation_token) => {
@@ -794,8 +839,7 @@ pub fn handle_messages_to_main(
                 }
                 debug!("url: {}", url);
 
-                let new_modified_url = url;
-                //let new_modified_url = unwrap_url(url.as_str());
+                let new_modified_url = unwrap_url(&url, behavioral_config);
                 let url_open_context = UrlOpenContext {
                     cleaned_url: new_modified_url.clone(),
                     source_app_maybe: Some(from_bundle_id.clone()),
@@ -1027,6 +1071,7 @@ pub fn handle_messages_to_main(
                 info!("Saving Behavioral settings");
                 let new_behavioral_config = BehavioralConfig {
                     unwrap_urls: settings.unwrap_urls,
+                    strip_tracking_parameters: settings.strip_tracking_parameters,
                 };
 
                 let mut config = app_finder.load_config();
