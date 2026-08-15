@@ -1,4 +1,5 @@
 use super::*;
+use url::Url;
 
 impl BrowserApp {
     pub(super) fn show_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -274,6 +275,11 @@ impl BrowserApp {
                 let menu_weak = weak.clone();
                 let expand_weak = weak.clone();
                 let menu_browser = browser.clone();
+                let current_host = Url::parse(&self.state.url)
+                    .ok()
+                    .and_then(|url| url.host_str().map(str::to_owned));
+                let source_app = self.state.source_app_maybe.clone();
+                let incognito = self.state.incognito_mode && browser.supports_incognito;
 
                 h_flex()
                     .id(("browser-row", index))
@@ -389,7 +395,14 @@ impl BrowserApp {
                             });
                         })
                         .detach();
-                        browser_context_menu(menu, menu_browser.clone(), menu_weak.clone())
+                        browser_context_menu(
+                            menu,
+                            menu_browser.clone(),
+                            menu_weak.clone(),
+                            current_host.clone(),
+                            source_app.clone(),
+                            incognito,
+                        )
                     })
             })
             .collect::<Vec<_>>();
@@ -576,6 +589,9 @@ fn browser_context_menu(
     mut menu: PopupMenu,
     browser: super::super::model::UIBrowser,
     weak: gpui::WeakEntity<BrowserApp>,
+    current_host: Option<String>,
+    source_app: Option<String>,
+    incognito: bool,
 ) -> PopupMenu {
     if !browser.has_priority_ordering() {
         for (label, direction, disabled) in [
@@ -610,13 +626,85 @@ fn browser_context_menu(
     }));
 
     if browser.supports_profiles {
-        let hide_all_weak = weak;
+        let hide_all_weak = weak.clone();
         let app_id = browser.unique_app_id;
         menu = menu.item(
             PopupMenuItem::new("Hide all profiles").on_click(move |_, _, cx| {
                 hide_all_weak
                     .update(cx, |this, _| {
                         this.send(MessageToMain::HideAllProfiles(app_id.clone()))
+                    })
+                    .ok();
+            }),
+        );
+    }
+
+    let profile_id = browser.unique_id;
+    if current_host.is_some() || source_app.is_some() {
+        menu = menu.separator();
+    }
+    if let Some(host) = current_host.clone() {
+        let host_weak = weak.clone();
+        let profile_id = profile_id.clone();
+        menu = menu.item(
+            PopupMenuItem::new(format!("Always use for {host}")).on_click(
+                move |_, _, cx| {
+                    host_weak
+                        .update(cx, |this, _| {
+                            this.send(MessageToMain::CreateOpeningRule {
+                                source_app: None,
+                                url_pattern: Some(host.clone()),
+                                opener: UIProfileAndIncognito {
+                                    profile: profile_id.clone(),
+                                    incognito,
+                                },
+                            })
+                        })
+                        .ok();
+                },
+            ),
+        );
+    }
+    if let Some(source_app_value) = source_app.clone() {
+        let source_weak = weak.clone();
+        let profile_id = profile_id.clone();
+        menu = menu.item(
+            PopupMenuItem::new(format!(
+                "Always use from {source_app_value}"
+            ))
+            .on_click(move |_, _, cx| {
+                source_weak
+                    .update(cx, |this, _| {
+                        this.send(MessageToMain::CreateOpeningRule {
+                            source_app: Some(source_app_value.clone()),
+                            url_pattern: None,
+                            opener: UIProfileAndIncognito {
+                                profile: profile_id.clone(),
+                                incognito,
+                            },
+                        })
+                    })
+                    .ok();
+            }),
+        );
+    }
+    if let (Some(host), Some(source_app_value)) = (current_host, source_app) {
+        let both_weak = weak;
+        menu = menu.item(
+            PopupMenuItem::new(format!(
+                "Always use for {host} from {source_app_value}"
+            ))
+            .on_click(move |_, _, cx| {
+                both_weak
+                    .update(cx, |this, _| {
+                        this.send(MessageToMain::CreateOpeningRule {
+                            source_app: Some(source_app_value.clone()),
+                            url_pattern: Some(host.clone()),
+                            opener: UIProfileAndIncognito {
+                                profile: profile_id.clone(),
+                                incognito,
+                            },
+                        })
                     })
                     .ok();
             }),
