@@ -615,6 +615,7 @@ impl BrowserApp {
             Ok(handle) => {
                 self.picker_window = Some(handle);
                 info!("Created picker window");
+                #[cfg(not(target_os = "macos"))]
                 cx.activate(true);
             }
             Err(error) => {
