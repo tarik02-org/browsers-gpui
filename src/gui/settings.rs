@@ -36,13 +36,17 @@ impl BrowserApp {
     }
     pub(super) fn show_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let display_id = window.display(cx).map(|display| display.id());
-        self.open_settings(display_id, Some(window), false, cx);
+        self.open_settings(display_id, Some(window), cfg!(target_os = "macos"), cx);
     }
 
     #[cfg(target_os = "macos")]
     pub(super) fn show_settings_from_status_item(&mut self, cx: &mut Context<Self>) {
         self.close_daemon_picker(cx);
-        self.open_settings(None, None, true, cx);
+        let this = cx.weak_entity();
+        cx.defer(move |cx| {
+            this.update(cx, |this, cx| this.open_settings(None, None, true, cx))
+                .ok();
+        });
     }
 
     fn open_settings(
