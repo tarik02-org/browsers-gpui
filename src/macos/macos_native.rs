@@ -1,15 +1,62 @@
-use objc2::AnyThread;
+use gpui::{Bounds, Pixels, Point, point, px, size};
 use objc2::rc::Retained;
+use objc2::{AnyThread, MainThreadMarker};
 use std::collections::HashSet;
 use std::ops::Deref;
 use std::path::PathBuf;
 
-use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSWorkspace};
+use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep, NSEvent, NSScreen, NSWorkspace};
 use objc2_foundation::{
-    NSArray, NSBundle, NSDictionary, NSPoint, NSRect, NSSearchPathDirectory,
+    NSArray, NSBundle, NSDictionary, NSNumber, NSPoint, NSRect, NSSearchPathDirectory,
     NSSearchPathDomainMask, NSSearchPathForDirectoriesInDomains, NSSize, NSString,
 };
 use tracing::debug;
+
+pub fn cursor_position() -> Option<(u64, Point<Pixels>, Bounds<Pixels>)> {
+    let main_thread = MainThreadMarker::new()?;
+    let cursor = NSEvent::mouseLocation();
+
+    for screen in NSScreen::screens(main_thread).iter() {
+        let frame = screen.frame();
+        if cursor.x < frame.origin.x
+            || cursor.x >= frame.origin.x + frame.size.width
+            || cursor.y < frame.origin.y
+            || cursor.y >= frame.origin.y + frame.size.height
+        {
+            continue;
+        }
+
+        let description = screen.deviceDescription();
+        let display_id_key = NSString::from_str("NSScreenNumber");
+        let display_id = description
+            .objectForKey(&display_id_key)?
+            .downcast::<NSNumber>()
+            .ok()?
+            .as_u64();
+
+        let visible_frame = screen.visibleFrame();
+        let cursor = point(
+            px((cursor.x - frame.origin.x) as f32),
+            px((frame.origin.y + frame.size.height - cursor.y) as f32),
+        );
+        let visible_bounds = Bounds::new(
+            point(
+                px((visible_frame.origin.x - frame.origin.x) as f32),
+                px((frame.origin.y + frame.size.height
+                    - visible_frame.origin.y
+                    - visible_frame.size.height) as f32),
+            ),
+            size(
+                px(visible_frame.size.width as f32),
+                px(visible_frame.size.height as f32),
+            ),
+        );
+
+        return Some((display_id, cursor, visible_bounds));
+    }
+
+    None
+}
 
 pub fn create_icon_for_app(full_path: &NSString, icon_path: &str) {
     unsafe {

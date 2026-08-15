@@ -459,7 +459,7 @@ impl BrowserApp {
         }
 
         let size = self.current_picker_size();
-        let origin = picker_origin(pointer, viewport, size);
+        let origin = picker_origin(pointer, Bounds::new(Point::default(), viewport), size);
         info!(?origin, cursor = ?pointer, ?viewport, "Positioned fallback picker");
         self.picker_placement = PickerPlacement::Placed(origin);
         self.set_picker_input_region(window, size);
@@ -2203,33 +2203,35 @@ fn clamp_pixels(value: Pixels, minimum: Pixels, maximum: Pixels) -> Pixels {
 
 fn picker_origin(
     pointer: Point<Pixels>,
-    viewport: Size<Pixels>,
+    viewport: Bounds<Pixels>,
     picker: Size<Pixels>,
 ) -> Point<Pixels> {
     let margin = px(PICKER_SCREEN_MARGIN);
     let offset = px(PICKER_CURSOR_OFFSET);
-    let max_x = viewport.width - picker.width - margin;
-    let max_y = viewport.height - picker.height - margin;
+    let minimum_x = viewport.origin.x + margin;
+    let minimum_y = viewport.origin.y + margin;
+    let maximum_x = viewport.origin.x + viewport.size.width - picker.width - margin;
+    let maximum_y = viewport.origin.y + viewport.size.height - picker.height - margin;
 
     let mut x = pointer.x + offset;
-    if x + picker.width > viewport.width - margin {
+    if x + picker.width > viewport.origin.x + viewport.size.width - margin {
         x = pointer.x - picker.width - offset;
     }
     let mut y = pointer.y + offset;
-    if y + picker.height > viewport.height - margin {
+    if y + picker.height > viewport.origin.y + viewport.size.height - margin {
         y = pointer.y - picker.height - offset;
     }
 
     gpui::point(
-        if max_x < margin {
-            px(0.0)
+        if maximum_x < minimum_x {
+            viewport.origin.x
         } else {
-            clamp_pixels(x, margin, max_x)
+            clamp_pixels(x, minimum_x, maximum_x)
         },
-        if max_y < margin {
-            px(0.0)
+        if maximum_y < minimum_y {
+            viewport.origin.y
         } else {
-            clamp_pixels(y, margin, max_y)
+            clamp_pixels(y, minimum_y, maximum_y)
         },
     )
 }
@@ -2254,7 +2256,25 @@ fn picker_window_options(
     cx: &App,
 ) -> WindowOptions {
     let use_layer_shell = placement == PickerWindowPlacement::PointerProbe;
-    let bounds = Bounds::centered(None, picker_size(state), cx);
+    let picker_size = picker_size(state);
+    let bounds = Bounds::centered(None, picker_size, cx);
+
+    #[cfg(target_os = "macos")]
+    let (bounds, display_id) = if placement == PickerWindowPlacement::UnderCursor
+        && let Some((cursor_display_id, cursor, visible_bounds)) =
+            crate::macos::macos_native::cursor_position()
+    {
+        (
+            Bounds::new(picker_origin(cursor, visible_bounds, picker_size), picker_size),
+            Some(gpui::DisplayId::new(cursor_display_id)),
+        )
+    } else {
+        (bounds, None)
+    };
+
+    #[cfg(not(target_os = "macos"))]
+    let display_id = None;
+
     let mut options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(bounds)),
         titlebar: None,
@@ -2268,6 +2288,7 @@ fn picker_window_options(
         window_decorations: Some(WindowDecorations::Client),
         open_under_cursor: placement == PickerWindowPlacement::UnderCursor,
         activation_token,
+        display_id,
         ..Default::default()
     };
 
@@ -2434,13 +2455,18 @@ pub fn run(
                 )
             })
         } else {
+            #[cfg(target_os = "macos")]
+            let placement = PickerWindowPlacement::UnderCursor;
+            #[cfg(not(target_os = "macos"))]
+            let placement = PickerWindowPlacement::Default;
+
             open_picker_window(
                 cx,
                 state,
                 main_sender,
                 ui_receiver,
                 unwrap_urls,
-                PickerWindowPlacement::Default,
+                placement,
                 false,
             )
         };
