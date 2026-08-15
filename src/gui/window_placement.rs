@@ -218,6 +218,7 @@ pub(super) fn open_picker_window(
     main_sender: Sender<MessageToMain>,
     ui_receiver: Rc<RefCell<Option<UiReceiver<MessageToUi>>>>,
     unwrap_urls: Arc<AtomicBool>,
+    strip_tracking_parameters: Arc<AtomicBool>,
     placement: PickerWindowPlacement,
     persistent: bool,
 ) -> anyhow::Result<()> {
@@ -233,6 +234,7 @@ pub(super) fn open_picker_window(
                 main_sender,
                 ui_receiver,
                 unwrap_urls,
+                strip_tracking_parameters,
                 placement == PickerWindowPlacement::PointerProbe,
                 persistent,
                 window,

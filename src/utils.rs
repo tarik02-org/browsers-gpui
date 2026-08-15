@@ -72,6 +72,7 @@ pub struct RecentProfiles {
 #[serde(default)]
 pub struct BehavioralConfig {
     pub unwrap_urls: bool,
+    pub strip_tracking_parameters: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

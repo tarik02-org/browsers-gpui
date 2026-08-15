@@ -209,12 +209,14 @@ impl UIVisualSettings {
 #[derive(Clone, Debug)]
 pub struct UIBehavioralSettings {
     pub unwrap_urls: bool,
+    pub strip_tracking_parameters: bool,
 }
 
 impl UIBehavioralSettings {
     pub fn from_config(config: &BehavioralConfig) -> Self {
         Self {
             unwrap_urls: config.unwrap_urls,
+            strip_tracking_parameters: config.strip_tracking_parameters,
         }
     }
 }

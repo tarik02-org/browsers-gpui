@@ -65,6 +65,7 @@ impl BrowserApp {
         );
         let main_sender = self.main_sender.clone();
         let unwrap_urls = self.unwrap_urls.clone();
+        let strip_tracking_parameters = self.strip_tracking_parameters.clone();
         let settings_updates_sender = self.settings_updates_sender.clone();
         let auxiliary_windows = self.auxiliary_windows.clone();
         let auxiliary_window_handles = self.auxiliary_window_handles.clone();
@@ -76,6 +77,7 @@ impl BrowserApp {
                     state,
                     main_sender,
                     unwrap_urls,
+                    strip_tracking_parameters,
                     Screen::Picker,
                     settings_updates_sender,
                     auxiliary_windows,

@@ -21,6 +21,12 @@ impl BrowserApp {
             PickerSettingsUpdate::UnwrapUrls(unwrap) => {
                 self.state.ui_settings.behavioral_settings.unwrap_urls = unwrap;
             }
+            PickerSettingsUpdate::StripTrackingParameters(strip) => {
+                self.state
+                    .ui_settings
+                    .behavioral_settings
+                    .strip_tracking_parameters = strip;
+            }
         }
 
         if let Some(handle) = self.picker_window
@@ -69,6 +75,7 @@ impl BrowserApp {
         let state = self.state.clone();
         let main_sender = self.main_sender.clone();
         let unwrap_urls = self.unwrap_urls.clone();
+        let strip_tracking_parameters = self.strip_tracking_parameters.clone();
         let settings_updates_sender = self.settings_updates_sender.clone();
         let auxiliary_windows = self.auxiliary_windows.clone();
         let auxiliary_window_handles = self.auxiliary_window_handles.clone();
@@ -96,6 +103,7 @@ impl BrowserApp {
                         state,
                         main_sender,
                         unwrap_urls,
+                        strip_tracking_parameters,
                         Screen::Settings,
                         settings_updates_sender,
                         auxiliary_windows,
@@ -145,6 +153,7 @@ impl BrowserApp {
         let state = self.state.clone();
         let main_sender = self.main_sender.clone();
         let unwrap_urls = self.unwrap_urls.clone();
+        let strip_tracking_parameters = self.strip_tracking_parameters.clone();
         let settings_updates_sender = self.settings_updates_sender.clone();
         let auxiliary_windows = self.auxiliary_windows.clone();
         let auxiliary_window_handles = self.auxiliary_window_handles.clone();
@@ -177,6 +186,7 @@ impl BrowserApp {
                         state,
                         main_sender,
                         unwrap_urls,
+                        strip_tracking_parameters,
                         Screen::About,
                         settings_updates_sender,
                         auxiliary_windows,
@@ -338,6 +348,11 @@ impl BrowserApp {
         let hotkeys = self.state.ui_settings.visual_settings.show_hotkeys;
         let quit_on_blur = self.state.ui_settings.visual_settings.quit_on_lost_focus;
         let unwrap = self.state.ui_settings.behavioral_settings.unwrap_urls;
+        let strip_tracking_parameters = self
+            .state
+            .ui_settings
+            .behavioral_settings
+            .strip_tracking_parameters;
 
         v_flex()
             .gap_3()
@@ -388,6 +403,27 @@ impl BrowserApp {
                         this.unwrap_urls.store(*checked, Ordering::Relaxed);
                         this.settings_updates_sender
                             .send(PickerSettingsUpdate::UnwrapUrls(*checked))
+                            .ok();
+                        this.send(MessageToMain::SaveConfigUIBehavioralSettings(
+                            this.state.ui_settings.behavioral_settings.clone(),
+                        ));
+                        cx.notify();
+                    })),
+            ))
+            .child(setting_row(
+                "Strip tracking parameters",
+                "Remove common marketing parameters before opening links",
+                Switch::new("strip-tracking-parameters")
+                    .checked(strip_tracking_parameters)
+                    .on_click(cx.listener(|this, checked, _, cx| {
+                        this.state
+                            .ui_settings
+                            .behavioral_settings
+                            .strip_tracking_parameters = *checked;
+                        this.strip_tracking_parameters
+                            .store(*checked, Ordering::Relaxed);
+                        this.settings_updates_sender
+                            .send(PickerSettingsUpdate::StripTrackingParameters(*checked))
                             .ok();
                         this.send(MessageToMain::SaveConfigUIBehavioralSettings(
                             this.state.ui_settings.behavioral_settings.clone(),
