@@ -486,6 +486,7 @@ impl BrowserApp {
                     .is_some_and(|opener| opener.incognito);
                 let private_disabled = editor.opener.is_none();
                 v_flex()
+                    .flex_none()
                     .rounded_lg()
                     .border_1()
                     .border_color(cx.theme().border)
