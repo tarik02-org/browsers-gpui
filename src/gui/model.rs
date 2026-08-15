@@ -13,6 +13,7 @@ use crate::utils::{BehavioralConfig, Config, ConfiguredTheme, ProfileAndOptions,
 #[derive(Clone, Debug)]
 pub struct UIState {
     pub url: String,
+    pub source_app_maybe: Option<String>,
     pub selected_browser: String,
     pub focused_index: Option<usize>,
     pub incognito_mode: bool,
@@ -39,6 +40,7 @@ impl UIState {
         let filtered_browsers = Arc::new(get_filtered_browsers(&url, &browsers));
         Self {
             url,
+            source_app_maybe: None,
             selected_browser: String::new(),
             focused_index: None,
             incognito_mode: false,

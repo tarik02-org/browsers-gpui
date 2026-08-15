@@ -461,6 +461,8 @@ impl BrowserApp {
                 activation_token,
             } => {
                 self.state.set_url(url.clone());
+                self.state.source_app_maybe =
+                    (!source_bundle_id.is_empty()).then_some(source_bundle_id.clone());
                 if self.persistent {
                     self.open_daemon_picker(activation_token, cx);
                 } else if let Some(window) = window.as_deref_mut() {
@@ -503,6 +505,21 @@ impl BrowserApp {
                     && handle
                         .update(cx, |picker, _, cx| {
                             picker.state.restorable_app_profiles = browsers;
+                            cx.notify();
+                        })
+                        .is_err()
+                {
+                    self.picker_window = None;
+                }
+                cx.notify();
+            }
+            MessageToUi::RulesUpdated(rules) => {
+                let rules = Arc::new(rules);
+                self.state.ui_settings.rules = rules.clone();
+                if let Some(handle) = self.picker_window
+                    && handle
+                        .update(cx, |picker, _, cx| {
+                            picker.state.ui_settings.rules = rules;
                             cx.notify();
                         })
                         .is_err()
