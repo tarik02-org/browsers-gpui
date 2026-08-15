@@ -39,6 +39,7 @@ gpui-component-assets = { git = "https://github.com/longbridge/gpui-component", 
 image = { version = "0.24.9", default-features = false, features = ["png", "jpeg"] }
 anyhow = "1.0"
 flume = "0.12"
+notify = "7.0.0"
 
 # parse urls
 url = "2.5.7"

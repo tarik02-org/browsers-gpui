@@ -41,6 +41,8 @@ mod windows;
 
 mod chromium_profiles_parser;
 mod firefox_profiles_parser;
+mod profile_watcher;
+pub use profile_watcher::ProfileWatcher;
 mod slack_profiles_parser;
 mod slack_url_parser;
 mod url_rule;
@@ -664,13 +666,14 @@ pub fn handle_messages_to_main(
     opening_rules_and_default_profile: &mut OpeningRulesAndDefaultProfile,
     visible_and_hidden_profiles: &mut VisibleAndHiddenProfiles,
     behavioral_config: &mut BehavioralConfig,
-    app_finder: &OSAppFinder,
+    app_finder: &mut OSAppFinder,
 ) {
     for message in main_receiver.iter() {
         match message {
             MessageToMain::Refresh => {
                 info!("refresh called");
 
+                *app_finder = OSAppFinder::new();
                 let config = app_finder.load_config();
                 *opening_rules_and_default_profile = get_opening_rules(&config);
                 *behavioral_config = config.get_behavior().clone();
