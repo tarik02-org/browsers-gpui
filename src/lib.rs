@@ -695,21 +695,49 @@ pub fn handle_messages_to_main(
                     .send(MessageToUi::HiddenBrowsersUpdated(ui_hidden_browsers))
                     .ok();
             }
-            MessageToMain::OpenLink(profile_index, incognito_mode, url) => {
+            MessageToMain::OpenLink(profile_index, incognito_mode, url, source_app_maybe) => {
                 let option = &visible_and_hidden_profiles
                     .visible_browser_profiles
                     .get(profile_index);
                 let profile = option.unwrap();
+
+                let mut config = app_finder.load_config();
+                let profile_id = profile.get_unique_id();
+                let mut remembered = false;
+                if let Some(host) = url_host(url.as_str()) {
+                    config
+                        .recent_profiles
+                        .domains
+                        .insert(host, profile_id.clone());
+                    remembered = true;
+                }
+                if let Some(source_app) = source_app_maybe {
+                    config
+                        .recent_profiles
+                        .source_apps
+                        .insert(source_app, profile_id);
+                    remembered = true;
+                }
+                if remembered {
+                    app_finder.save_config(&config);
+                }
+
                 profile.open_link(url.as_str(), incognito_mode);
                 ui_sender.send(MessageToUi::OpenLinkCompleted).ok();
             }
             MessageToMain::UrlOpenRequest(from_bundle_id, url, activation_token) => {
                 let cleaned_url = unwrap_url(&url, behavioral_config);
+                let config = app_finder.load_config();
                 let url_open_context = UrlOpenContext {
                     cleaned_url: cleaned_url.clone(),
                     source_app_maybe: (!from_bundle_id.is_empty())
                         .then_some(from_bundle_id.clone()),
                 };
+                let recent_profile_ids = recent_profile_ids_for(
+                    &config,
+                    cleaned_url.as_str(),
+                    url_open_context.source_app_maybe.as_deref(),
+                );
 
                 if open_link_if_matching_rule(
                     &url_open_context,
@@ -723,18 +751,28 @@ pub fn handle_messages_to_main(
                             source_bundle_id: from_bundle_id,
                             url: cleaned_url,
                             activation_token,
+                            recent_profile_ids,
                         })
                         .ok();
                 }
             }
             MessageToMain::UrlPassedToMain(from_bundle_id, url, behavioral_config) => {
                 let new_modified_url = unwrap_url(url.as_str(), &behavioral_config);
+                let config = app_finder.load_config();
+                let source_app_maybe =
+                    (!from_bundle_id.is_empty()).then_some(from_bundle_id.clone());
+                let recent_profile_ids = recent_profile_ids_for(
+                    &config,
+                    new_modified_url.as_str(),
+                    source_app_maybe.as_deref(),
+                );
 
                 ui_sender
                     .send(MessageToUi::UrlOpened {
                         source_bundle_id: from_bundle_id,
                         url: new_modified_url,
                         activation_token: None,
+                        recent_profile_ids,
                     })
                     .ok();
             }
@@ -1022,7 +1060,38 @@ pub fn prepare_ui(
         UISettings::from_config(config),
     );
     state.source_app_maybe = url_open_context.source_app_maybe.clone();
+    state.recent_profile_ids = recent_profile_ids_for(
+        config,
+        url_open_context.cleaned_url.as_str(),
+        url_open_context.source_app_maybe.as_deref(),
+    );
     state
+}
+
+fn url_host(url: &str) -> Option<String> {
+    Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_owned))
+}
+
+fn recent_profile_ids_for(
+    config: &Config,
+    url: &str,
+    source_app_maybe: Option<&str>,
+) -> Vec<String> {
+    let mut profile_ids = Vec::new();
+    if let Some(host) = url_host(url)
+        && let Some(profile_id) = config.recent_profiles.domains.get(host.as_str())
+    {
+        profile_ids.push(profile_id.to_owned());
+    }
+    if let Some(source_app) = source_app_maybe
+        && let Some(profile_id) = config.recent_profiles.source_apps.get(source_app)
+        && !profile_ids.iter().any(|id| id == profile_id)
+    {
+        profile_ids.push(profile_id.to_owned());
+    }
+    profile_ids
 }
 
 pub fn open_link_if_matching_rule(
@@ -1166,6 +1235,7 @@ pub enum MessageToUi {
         source_bundle_id: String,
         url: String,
         activation_token: Option<String>,
+        recent_profile_ids: Vec<String>,
     },
     BrowsersUpdated(Vec<UIBrowser>),
     HiddenBrowsersUpdated(Vec<UIBrowser>),
@@ -1175,7 +1245,7 @@ pub enum MessageToUi {
 #[derive(Debug)]
 pub enum MessageToMain {
     Refresh,
-    OpenLink(usize, bool, String),
+    OpenLink(usize, bool, String, Option<String>),
     // UrlOpenRequest is almost like LinkOpenedFromBundle, but triggers gui, not from gui
     UrlOpenRequest(String, String, Option<String>),
     UrlPassedToMain(String, String, BehavioralConfig),

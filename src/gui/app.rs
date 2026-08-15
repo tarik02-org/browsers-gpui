@@ -459,10 +459,12 @@ impl BrowserApp {
                 source_bundle_id,
                 url,
                 activation_token,
+                recent_profile_ids,
             } => {
                 self.state.set_url(url.clone());
                 self.state.source_app_maybe =
                     (!source_bundle_id.is_empty()).then_some(source_bundle_id.clone());
+                self.state.recent_profile_ids = recent_profile_ids;
                 if self.persistent {
                     self.open_daemon_picker(activation_token, cx);
                 } else if let Some(window) = window.as_deref_mut() {

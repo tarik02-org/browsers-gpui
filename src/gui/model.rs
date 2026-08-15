@@ -14,6 +14,7 @@ use crate::utils::{BehavioralConfig, Config, ConfiguredTheme, ProfileAndOptions,
 pub struct UIState {
     pub url: String,
     pub source_app_maybe: Option<String>,
+    pub recent_profile_ids: Vec<String>,
     pub selected_browser: String,
     pub focused_index: Option<usize>,
     pub incognito_mode: bool,
@@ -41,6 +42,7 @@ impl UIState {
         Self {
             url,
             source_app_maybe: None,
+            recent_profile_ids: Vec::new(),
             selected_browser: String::new(),
             focused_index: None,
             incognito_mode: false,
