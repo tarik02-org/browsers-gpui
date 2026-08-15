@@ -885,7 +885,7 @@ fn setting_row(
 }
 fn opener_label(
     opener: &Option<UIProfileAndIncognito>,
-    browsers: &[super::model::UIBrowser],
+    browsers: &[super::super::model::UIBrowser],
 ) -> String {
     opener
         .as_ref()

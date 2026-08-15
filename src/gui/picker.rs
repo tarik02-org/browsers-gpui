@@ -574,7 +574,7 @@ impl BrowserApp {
 
 fn browser_context_menu(
     mut menu: PopupMenu,
-    browser: super::model::UIBrowser,
+    browser: super::super::model::UIBrowser,
     weak: gpui::WeakEntity<BrowserApp>,
 ) -> PopupMenu {
     if !browser.has_priority_ordering() {
