@@ -2,7 +2,7 @@ use flume::{Receiver, Sender};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject};
 use objc2::{AnyThread, DefinedClass, MainThreadMarker, define_class, msg_send, sel};
-use objc2_app_kit::{NSMenu, NSMenuItem, NSStatusBar, NSVariableStatusItemLength};
+use objc2_app_kit::{NSImage, NSMenu, NSMenuItem, NSStatusBar, NSVariableStatusItemLength};
 use objc2_foundation::NSString;
 
 #[derive(Clone, Copy)]
@@ -81,7 +81,13 @@ impl StatusItem {
         item.setMenu(Some(&menu));
 
         if let Some(button) = item.button(main_thread) {
-            button.setTitle(&NSString::from_str("Browsers"));
+            let icon = NSImage::imageWithSystemSymbolName_accessibilityDescription(
+                &NSString::from_str("globe"),
+                Some(&NSString::from_str("Browsers")),
+            )
+            .expect("globe system symbol must be available");
+            icon.setTemplate(true);
+            button.setImage(Some(&icon));
         }
 
         Ok((
