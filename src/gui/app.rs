@@ -2396,25 +2396,40 @@ pub fn run(
         apply_theme(state.ui_settings.visual_settings.theme, None, cx);
 
         if persistent {
-            let ui_receiver = Rc::new(RefCell::new(Some(ui_receiver)));
-            if let Err(error) = open_picker_window(
-                cx,
-                state.clone(),
-                main_sender.clone(),
-                ui_receiver.clone(),
-                unwrap_urls.clone(),
-                PickerWindowPlacement::PointerProbe,
-                true,
-            ) {
-                warn!("Layer-shell daemon host unavailable, using headless daemon: {error}");
-                let ui_receiver = ui_receiver
-                    .borrow_mut()
-                    .take()
-                    .expect("daemon UI receiver was already consumed");
+            #[cfg(target_os = "macos")]
+            {
+                let show_initial_picker = !state.url.is_empty();
                 let app = cx.new(|cx| {
                     BrowserApp::new_daemon(state, main_sender, ui_receiver, unwrap_urls, cx)
                 });
+                if show_initial_picker {
+                    app.update(cx, |app, cx| app.open_daemon_picker(None, cx));
+                }
                 cx.set_global(DaemonApp { _app: app });
+            }
+
+            #[cfg(target_os = "linux")]
+            {
+                let ui_receiver = Rc::new(RefCell::new(Some(ui_receiver)));
+                if let Err(error) = open_picker_window(
+                    cx,
+                    state.clone(),
+                    main_sender.clone(),
+                    ui_receiver.clone(),
+                    unwrap_urls.clone(),
+                    PickerWindowPlacement::PointerProbe,
+                    true,
+                ) {
+                    warn!("Layer-shell daemon host unavailable, using headless daemon: {error}");
+                    let ui_receiver = ui_receiver
+                        .borrow_mut()
+                        .take()
+                        .expect("daemon UI receiver was already consumed");
+                    let app = cx.new(|cx| {
+                        BrowserApp::new_daemon(state, main_sender, ui_receiver, unwrap_urls, cx)
+                    });
+                    cx.set_global(DaemonApp { _app: app });
+                }
             }
             return;
         }

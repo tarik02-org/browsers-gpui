@@ -181,5 +181,6 @@ fn main() {
         );
     });
 
-    browsers::gui::app::run(ui_state, main_sender, ui_receiver, is_daemon);
+    let persistent = is_daemon || cfg!(target_os = "macos");
+    browsers::gui::app::run(ui_state, main_sender, ui_receiver, persistent);
 }
