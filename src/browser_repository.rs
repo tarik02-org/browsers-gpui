@@ -102,6 +102,28 @@ impl SupportedAppRepository {
             });
     }
 
+    pub fn profile_watch_roots(&self) -> Vec<PathBuf> {
+        let mut roots = std::collections::HashSet::new();
+
+        for app in self.supported_apps.values() {
+            for root in [
+                &app.app_config_dir_absolute,
+                &app.snap_app_config_dir_absolute,
+                &app.macos_sandbox_app_config_dir_absolute,
+            ] {
+                if root.is_dir()
+                    && (root.join("Local State").is_file()
+                        || root.join("profiles.ini").is_file()
+                        || root.join("storage/root-state.json").is_file())
+                {
+                    roots.insert(root.clone());
+                }
+            }
+        }
+
+        roots.into_iter().collect()
+    }
+
     fn add(&mut self, supported_app: SupportedApp) -> &mut SupportedAppRepository {
         self.supported_apps
             .insert(supported_app.get_app_id().to_string(), supported_app);

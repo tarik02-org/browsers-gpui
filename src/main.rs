@@ -120,7 +120,7 @@ fn main() {
         None
     };
 
-    let app_finder = OSAppFinder::new();
+    let mut app_finder = OSAppFinder::new();
     let config = app_finder.load_config();
     let mut opening_rules_and_default_profile = get_opening_rules(&config);
 
@@ -170,6 +170,7 @@ fn main() {
 
     let (ui_sender, ui_receiver) = flume::unbounded();
 
+    let _profile_watcher = browsers::ProfileWatcher::new(main_sender.clone(), &app_finder);
     thread::spawn(move || {
         handle_messages_to_main(
             main_receiver,
@@ -177,7 +178,7 @@ fn main() {
             &mut opening_rules_and_default_profile,
             &mut visible_and_hidden_profiles,
             &mut behavioral_config,
-            &app_finder,
+            &mut app_finder,
         );
     });
 
