@@ -1,0 +1,137 @@
+name: Nightly release
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: nightly-release-${{ github.event.workflow_run.head_sha || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish nightly release
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    steps:
+      - id: source
+        name: Resolve source CI run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          run_id="$WORKFLOW_RUN_ID"
+          sha="$WORKFLOW_RUN_SHA"
+
+          if [[ -z "$run_id" ]]; then
+            source_run="$(
+              gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+                -f branch=main \
+                -f event=push \
+                -f status=success \
+                -f per_page=1 \
+                --jq '.workflow_runs[0] | [.id, .head_sha] | @tsv'
+            )"
+            read -r run_id sha <<< "$source_run"
+          fi
+
+          if [[ -z "$run_id" || -z "$sha" ]]; then
+            echo "No successful main-branch CI run found" >&2
+            exit 1
+          fi
+
+          {
+            echo "run_id=$run_id"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check out repository code
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+          show-progress: false
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: browsers-*-artifacts
+          run-id: ${{ steps.source.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify artifact directories
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ -d browsers-linux-artifacts ]]
+          [[ -d browsers-mac-artifacts ]]
+          [[ -d browsers-windows-artifacts ]]
+
+      - id: release
+        name: Resolve nightly release
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ steps.source.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          base_version="$(
+            cargo metadata --no-deps --format-version 1 |
+              jq -r '.packages[] | select(.name == "browsers") | .version'
+          )"
+          date="$(date -u +%Y%m%d)"
+          version="$base_version-nightly.$date.$GITHUB_RUN_NUMBER"
+          short_sha="${RELEASE_SHA:0:12}"
+
+          {
+            echo "version=$version"
+            echo "tag=v$version"
+            echo "name=Browsers nightly $version ($short_sha)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish nightly release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          target_commitish: ${{ steps.source.outputs.sha }}
+          name: ${{ steps.release.outputs.name }}
+          generate_release_notes: true
+          prerelease: true
+          make_latest: false
+          files: |
+            browsers-linux-artifacts/browsers_linux.tar.gz
+            browsers-linux-artifacts/browsers_linux.tar.gz.sha256
+            browsers-linux-artifacts/browsers_linux.tar.xz
+            browsers-linux-artifacts/browsers_linux.tar.xz.sha256
+            browsers-linux-artifacts/x86_64/browsers_amd64.deb
+            browsers-linux-artifacts/aarch64/browsers_arm64.deb
+            browsers-linux-artifacts/armv7l/browsers_armhf.deb
+            browsers-linux-artifacts/x86_64/browsers.x86_64.rpm
+            browsers-linux-artifacts/aarch64/browsers.aarch64.rpm
+            browsers-linux-artifacts/armv7l/browsers.armhfp.rpm
+            browsers-mac-artifacts/Browsers.dmg
+            browsers-mac-artifacts/browsers_mac.tar.gz
+            browsers-mac-artifacts/browsers_mac.tar.gz.sha256
+            browsers-mac-artifacts/browsers_mac.tar.xz
+            browsers-mac-artifacts/browsers_mac.tar.xz.sha256
+            browsers-windows-artifacts/Browsers_windows.zip
+            browsers-windows-artifacts/browsers_windows.tar.gz
+            browsers-windows-artifacts/browsers_windows.tar.gz.sha256
+            browsers-windows-artifacts/browsers_windows.tar.xz
+            browsers-windows-artifacts/browsers_windows.tar.xz.sha256
+          fail_on_unmatched_files: true
