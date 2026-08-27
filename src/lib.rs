@@ -924,6 +924,36 @@ pub fn handle_messages_to_main(
                 // it will already work with the new rule without restarting Browsers
                 opening_rules_and_default_profile.opening_rules = to_opening_rules(&new_rules);
             }
+            MessageToMain::CreateOpeningRule {
+                source_app,
+                url_pattern,
+                opener,
+            } => {
+                info!("Creating quick opening rule");
+
+                let mut config = app_finder.load_config();
+                let mut rules = config.get_rules().clone();
+                rules.retain(|rule| {
+                    rule.get_source_app() != source_app || rule.get_url_pattern() != url_pattern
+                });
+                rules.insert(
+                    0,
+                    ConfigRule {
+                        source_app,
+                        url_pattern,
+                        opener: Some(ProfileAndOptions {
+                            profile: opener.profile,
+                            incognito: opener.incognito,
+                        }),
+                    },
+                );
+                config.set_rules(&rules);
+                app_finder.save_config(&config);
+                opening_rules_and_default_profile.opening_rules = to_opening_rules(&rules);
+
+                let ui_rules = UISettings::from_config(&config).rules.as_ref().clone();
+                ui_sender.send(MessageToUi::RulesUpdated(ui_rules)).ok();
+            }
             MessageToMain::SaveConfigDefaultOpener(default_opener) => {
                 info!("Saving default opener");
                 let new_default_profile = default_opener.map(|p| ProfileAndOptions {
@@ -976,7 +1006,7 @@ pub fn prepare_ui(
     config: &Config,
     show_set_as_default: bool,
 ) -> UIState {
-    UIState::new(
+    let mut state = UIState::new(
         url_open_context.cleaned_url.as_str(),
         UIState::real_to_ui_browsers(
             visible_and_hidden_profiles
@@ -990,7 +1020,9 @@ pub fn prepare_ui(
         ),
         show_set_as_default,
         UISettings::from_config(config),
-    )
+    );
+    state.source_app_maybe = url_open_context.source_app_maybe.clone();
+    state
 }
 
 pub fn open_link_if_matching_rule(
@@ -1137,6 +1169,7 @@ pub enum MessageToUi {
     },
     BrowsersUpdated(Vec<UIBrowser>),
     HiddenBrowsersUpdated(Vec<UIBrowser>),
+    RulesUpdated(Vec<UISettingsRule>),
 }
 
 #[derive(Debug)]
@@ -1153,6 +1186,11 @@ pub enum MessageToMain {
     RestoreAppProfile(String),
     MoveAppProfile(String, MoveTo),
     SaveConfigRules(Vec<UISettingsRule>),
+    CreateOpeningRule {
+        source_app: Option<String>,
+        url_pattern: Option<String>,
+        opener: UIProfileAndIncognito,
+    },
     SaveConfigDefaultOpener(Option<UIProfileAndIncognito>),
     SaveConfigUISettings(UIVisualSettings),
     SaveConfigUIBehavioralSettings(UIBehavioralSettings),
