@@ -141,6 +141,7 @@ impl BrowserApp {
                 browser.browser_profile_index,
                 self.state.incognito_mode && browser.supports_incognito,
                 self.state.url.clone(),
+                self.state.source_app_maybe.clone(),
             ));
         }
     }
@@ -275,6 +276,11 @@ impl BrowserApp {
                 let menu_weak = weak.clone();
                 let expand_weak = weak.clone();
                 let menu_browser = browser.clone();
+                let is_recent = self
+                    .state
+                    .recent_profile_ids
+                    .iter()
+                    .any(|profile_id| profile_id == &browser.unique_id);
                 let current_host = Url::parse(&self.state.url)
                     .ok()
                     .and_then(|url| url.host_str().map(str::to_owned));
@@ -291,6 +297,20 @@ impl BrowserApp {
                     .cursor_pointer()
                     .when(selected, |this| this.bg(cx.theme().accent))
                     .hover(|style| style.bg(cx.theme().accent))
+                    .child(
+                        h_flex()
+                            .w(px(12.0))
+                            .items_center()
+                            .justify_center()
+                            .flex_none()
+                            .when(is_recent, |this| {
+                                this.child(
+                                    Icon::new(IconName::StarFill)
+                                        .xsmall()
+                                        .text_color(cx.theme().muted_foreground),
+                                )
+                            }),
+                    )
                     .child(
                         h_flex()
                             .w(px(24.0))
