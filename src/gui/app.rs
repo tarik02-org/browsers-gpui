@@ -50,6 +50,7 @@ const PICKER_MENU_EXTRA_WIDTH: f32 = 220.0;
 const PICKER_MENU_EXTRA_HEIGHT: f32 = 220.0;
 const PICKER_CURSOR_OFFSET: f32 = 8.0;
 const PICKER_SCREEN_MARGIN: f32 = 8.0;
+const PICKER_PLACEMENT_TIMEOUT: Duration = Duration::from_millis(100);
 const TRASH_ICON_PATH: &str = "icons/trash-2.svg";
 const TRASH_ICON: &[u8] = include_bytes!("../../resources/icons/trash-2.svg");
 const SETTINGS_WIDTH: f32 = 680.0;
@@ -217,13 +218,14 @@ impl BrowserApp {
 
         let event_task = cx.spawn(async move |this, cx| {
             while let Ok(message) = ui_receiver.recv_async().await {
-                if this
-                    .update(cx, |this, cx| this.handle_ui_event(message, None, cx))
-                    .is_err()
+                if let Err(error) =
+                    this.update(cx, |this, cx| this.handle_ui_event(message, None, cx))
                 {
-                    break;
+                    warn!(?error, "Daemon UI event task lost its owner");
+                    return;
                 }
             }
+            warn!("Daemon UI event channel disconnected");
         });
         let settings_task = cx.spawn(async move |this, cx| {
             while let Ok(update) = settings_updates_receiver.recv_async().await {
@@ -606,26 +608,10 @@ pub fn run(
 
             #[cfg(target_os = "linux")]
             {
-                let ui_receiver = Rc::new(RefCell::new(Some(ui_receiver)));
-                if let Err(error) = window_placement::open_picker_window(
-                    cx,
-                    state.clone(),
-                    main_sender.clone(),
-                    ui_receiver.clone(),
-                    unwrap_urls.clone(),
-                    PickerWindowPlacement::PointerProbe,
-                    true,
-                ) {
-                    warn!("Layer-shell daemon host unavailable, using headless daemon: {error}");
-                    let ui_receiver = ui_receiver
-                        .borrow_mut()
-                        .take()
-                        .expect("daemon UI receiver was already consumed");
-                    let app = cx.new(|cx| {
-                        BrowserApp::new_daemon(state, main_sender, ui_receiver, unwrap_urls, cx)
-                    });
-                    cx.set_global(DaemonApp { _app: app });
-                }
+                let app = cx.new(|cx| {
+                    BrowserApp::new_daemon(state, main_sender, ui_receiver, unwrap_urls, cx)
+                });
+                cx.set_global(DaemonApp { _app: app });
             }
             return;
         }

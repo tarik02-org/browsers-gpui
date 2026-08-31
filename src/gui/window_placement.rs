@@ -7,6 +7,31 @@ impl BrowserApp {
         }
 
         self._placement_task = Some(cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(10))
+                .await;
+
+            let placed_at_pointer = this
+                .update_in(cx, |this, window, cx| {
+                    if !this.picker_visible
+                        || !matches!(this.picker_placement, PickerPlacement::Waiting)
+                    {
+                        return true;
+                    }
+                    if !window.is_window_hovered() {
+                        return false;
+                    }
+
+                    this.place_picker_at(window.mouse_position(), window, cx)
+                })
+                .unwrap_or(true);
+            if placed_at_pointer {
+                return;
+            }
+
+            cx.background_executor()
+                .timer(PICKER_PLACEMENT_TIMEOUT - Duration::from_millis(10))
+                .await;
             loop {
                 let placed = this
                     .update_in(cx, |this, window, cx| {
@@ -15,18 +40,30 @@ impl BrowserApp {
                         {
                             return true;
                         }
-                        if !window.is_window_hovered() {
+
+                        let viewport = window.viewport_size();
+                        if viewport.width <= px(0.0) || viewport.height <= px(0.0) {
                             return false;
                         }
 
-                        this.place_picker_at(window.mouse_position(), window, cx)
+                        let size = this.current_picker_size();
+                        let origin = centered_picker_origin(viewport, size);
+                        warn!(
+                            ?origin,
+                            ?viewport,
+                            "Pointer placement timed out; centering picker"
+                        );
+                        this.picker_placement = PickerPlacement::Placed(origin);
+                        this.set_picker_input_region(window, size);
+                        cx.notify();
+                        true
                     })
                     .unwrap_or(true);
                 if placed {
                     break;
                 }
                 cx.background_executor()
-                    .timer(Duration::from_millis(10))
+                    .timer(Duration::from_millis(25))
                     .await;
             }
         }));
@@ -91,6 +128,26 @@ fn clamp_pixels(value: Pixels, minimum: Pixels, maximum: Pixels) -> Pixels {
     } else {
         value
     }
+}
+fn centered_picker_origin(viewport: Size<Pixels>, picker: Size<Pixels>) -> Point<Pixels> {
+    let margin = px(PICKER_SCREEN_MARGIN);
+    let maximum_x = viewport.width - picker.width - margin;
+    let maximum_y = viewport.height - picker.height - margin;
+    let centered_x = px((f32::from(viewport.width) - f32::from(picker.width)) / 2.0);
+    let centered_y = px((f32::from(viewport.height) - f32::from(picker.height)) / 2.0);
+
+    gpui::point(
+        if maximum_x < margin {
+            px(0.0)
+        } else {
+            clamp_pixels(centered_x, margin, maximum_x)
+        },
+        if maximum_y < margin {
+            px(0.0)
+        } else {
+            clamp_pixels(centered_y, margin, maximum_y)
+        },
+    )
 }
 fn picker_origin(
     pointer: Point<Pixels>,

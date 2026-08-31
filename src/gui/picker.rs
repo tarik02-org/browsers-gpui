@@ -137,7 +137,7 @@ impl BrowserApp {
     pub(super) fn open_filtered(&self, filtered_index: usize) {
         if let Some(browser) = self.state.filtered_browsers.get(filtered_index) {
             self.send(MessageToMain::OpenLink(
-                browser.browser_profile_index,
+                browser.unique_id.clone(),
                 self.state.incognito_mode && browser.supports_incognito,
                 self.state.url.clone(),
             ));

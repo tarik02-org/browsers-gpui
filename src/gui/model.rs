@@ -92,7 +92,6 @@ impl UIState {
             .iter()
             .enumerate()
             .map(|(index, profile)| UIBrowser {
-                browser_profile_index: index,
                 is_first: index == first_orderable,
                 is_last: index == profile_count - 1,
                 restricted_url_matchers: Arc::new(profile.get_restricted_url_matchers().clone()),
@@ -273,7 +272,6 @@ impl UISettingsRule {
 
 #[derive(Clone, Debug)]
 pub struct UIBrowser {
-    pub browser_profile_index: usize,
     pub is_first: bool,
     pub is_last: bool,
     pub restricted_url_matchers: Arc<Vec<UrlGlobMatcher>>,

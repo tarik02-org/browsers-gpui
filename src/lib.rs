@@ -319,8 +319,21 @@ impl CommonBrowserProfile {
         return self.profile_name.as_str();
     }
 
-    fn open_link(&self, url: &str, incognito_mode: bool) {
-        let _ = &self.create_command(url, incognito_mode).spawn();
+    fn open_link(&self, url: &str, incognito_mode: bool) -> bool {
+        match self.create_command(url, incognito_mode).spawn() {
+            Ok(mut child) => {
+                std::thread::spawn(move || {
+                    if let Err(error) = child.wait() {
+                        warn!("Could not reap browser launcher: {error}");
+                    }
+                });
+                true
+            }
+            Err(error) => {
+                warn!("Could not launch browser: {error}");
+                false
+            }
+        }
     }
 
     fn create_command(&self, url: &str, incognito_mode: bool) -> Command {
@@ -501,6 +514,12 @@ pub struct VisibleAndHiddenProfiles {
 }
 
 impl VisibleAndHiddenProfiles {
+    fn get_visible_browser_profile_by_id(&self, unique_id: &str) -> Option<&CommonBrowserProfile> {
+        self.visible_browser_profiles
+            .iter()
+            .find(|profile| profile.get_unique_id() == unique_id)
+    }
+
     pub(crate) fn get_browser_profile_by_id(
         &self,
         unique_id: &str,
@@ -674,9 +693,10 @@ pub fn handle_messages_to_main(
                 let config = app_finder.load_config();
                 *opening_rules_and_default_profile = get_opening_rules(&config);
                 *behavioral_config = config.get_behavior().clone();
-                ui_sender
-                    .send(MessageToUi::BehaviorUpdated((*behavioral_config).clone()))
-                    .ok();
+                send_to_ui(
+                    &ui_sender,
+                    MessageToUi::BehaviorUpdated((*behavioral_config).clone()),
+                );
 
                 *visible_and_hidden_profiles =
                     generate_all_browser_profiles(&config, app_finder, true);
@@ -684,24 +704,28 @@ pub fn handle_messages_to_main(
                 let ui_browsers = UIState::real_to_ui_browsers(
                     &visible_and_hidden_profiles.visible_browser_profiles,
                 );
-                ui_sender
-                    .send(MessageToUi::BrowsersUpdated(ui_browsers))
-                    .ok();
+                send_to_ui(&ui_sender, MessageToUi::BrowsersUpdated(ui_browsers));
 
                 let ui_hidden_browsers = UIState::real_to_ui_browsers(
                     &visible_and_hidden_profiles.hidden_browser_profiles,
                 );
-                ui_sender
-                    .send(MessageToUi::HiddenBrowsersUpdated(ui_hidden_browsers))
-                    .ok();
+                send_to_ui(
+                    &ui_sender,
+                    MessageToUi::HiddenBrowsersUpdated(ui_hidden_browsers),
+                );
             }
-            MessageToMain::OpenLink(profile_index, incognito_mode, url) => {
-                let option = &visible_and_hidden_profiles
-                    .visible_browser_profiles
-                    .get(profile_index);
-                let profile = option.unwrap();
-                profile.open_link(url.as_str(), incognito_mode);
-                ui_sender.send(MessageToUi::OpenLinkCompleted).ok();
+            MessageToMain::OpenLink(profile_id, incognito_mode, url) => {
+                match visible_and_hidden_profiles.get_visible_browser_profile_by_id(&profile_id) {
+                    Some(profile) => {
+                        if !profile.open_link(url.as_str(), incognito_mode) {
+                            warn!("Could not launch selected browser profile: {profile_id}");
+                        }
+                    }
+                    None => {
+                        warn!("Selected browser profile no longer exists: {profile_id}");
+                    }
+                }
+                send_to_ui(&ui_sender, MessageToUi::OpenLinkCompleted);
             }
             MessageToMain::UrlOpenRequest(from_bundle_id, url, activation_token) => {
                 let cleaned_url = unwrap_url(&url, behavioral_config);
@@ -716,27 +740,29 @@ pub fn handle_messages_to_main(
                     opening_rules_and_default_profile,
                     visible_and_hidden_profiles,
                 ) {
-                    ui_sender.send(MessageToUi::OpenLinkCompleted).ok();
+                    send_to_ui(&ui_sender, MessageToUi::OpenLinkCompleted);
                 } else {
-                    ui_sender
-                        .send(MessageToUi::UrlOpened {
+                    send_to_ui(
+                        &ui_sender,
+                        MessageToUi::UrlOpened {
                             source_bundle_id: from_bundle_id,
                             url: cleaned_url,
                             activation_token,
-                        })
-                        .ok();
+                        },
+                    );
                 }
             }
             MessageToMain::UrlPassedToMain(from_bundle_id, url, behavioral_config) => {
                 let new_modified_url = unwrap_url(url.as_str(), &behavioral_config);
 
-                ui_sender
-                    .send(MessageToUi::UrlOpened {
+                send_to_ui(
+                    &ui_sender,
+                    MessageToUi::UrlOpened {
                         source_bundle_id: from_bundle_id,
                         url: new_modified_url,
                         activation_token: None,
-                    })
-                    .ok();
+                    },
+                );
             }
             MessageToMain::LinkOpenedFromBundle(from_bundle_id, url) => {
                 // TODO: do something once we have rules to
@@ -772,8 +798,9 @@ pub fn handle_messages_to_main(
                         visible_and_hidden_profiles.get_browser_profile_by_id(profile_id.as_str());
 
                     if let Some(profile) = profile_maybe {
-                        profile.open_link(new_modified_url.as_str(), incognito);
-                        ui_sender.send(MessageToUi::OpenLinkCompleted).ok();
+                        if profile.open_link(new_modified_url.as_str(), incognito) {
+                            send_to_ui(&ui_sender, MessageToUi::OpenLinkCompleted);
+                        }
                     }
                 }
             }
@@ -809,16 +836,15 @@ pub fn handle_messages_to_main(
                 let ui_browsers = UIState::real_to_ui_browsers(
                     &visible_and_hidden_profiles.visible_browser_profiles,
                 );
-                ui_sender
-                    .send(MessageToUi::BrowsersUpdated(ui_browsers))
-                    .ok();
+                send_to_ui(&ui_sender, MessageToUi::BrowsersUpdated(ui_browsers));
 
                 let ui_hidden_browsers = UIState::real_to_ui_browsers(
                     &visible_and_hidden_profiles.hidden_browser_profiles,
                 );
-                ui_sender
-                    .send(MessageToUi::HiddenBrowsersUpdated(ui_hidden_browsers))
-                    .ok();
+                send_to_ui(
+                    &ui_sender,
+                    MessageToUi::HiddenBrowsersUpdated(ui_hidden_browsers),
+                );
             }
             MessageToMain::HideAppProfile(unique_id) => {
                 info!("Hiding profile {}", unique_id);
@@ -842,16 +868,15 @@ pub fn handle_messages_to_main(
                     let ui_browsers = UIState::real_to_ui_browsers(
                         &visible_and_hidden_profiles.visible_browser_profiles,
                     );
-                    ui_sender
-                        .send(MessageToUi::BrowsersUpdated(ui_browsers))
-                        .ok();
+                    send_to_ui(&ui_sender, MessageToUi::BrowsersUpdated(ui_browsers));
 
                     let ui_hidden_browsers = UIState::real_to_ui_browsers(
                         &visible_and_hidden_profiles.hidden_browser_profiles,
                     );
-                    ui_sender
-                        .send(MessageToUi::HiddenBrowsersUpdated(ui_hidden_browsers))
-                        .ok();
+                    send_to_ui(
+                        &ui_sender,
+                        MessageToUi::HiddenBrowsersUpdated(ui_hidden_browsers),
+                    );
                 }
             }
             MessageToMain::RestoreAppProfile(unique_id) => {
@@ -884,16 +909,15 @@ pub fn handle_messages_to_main(
                     let ui_browsers = UIState::real_to_ui_browsers(
                         &visible_and_hidden_profiles.visible_browser_profiles,
                     );
-                    ui_sender
-                        .send(MessageToUi::BrowsersUpdated(ui_browsers))
-                        .ok();
+                    send_to_ui(&ui_sender, MessageToUi::BrowsersUpdated(ui_browsers));
 
                     let ui_hidden_browsers = UIState::real_to_ui_browsers(
                         &visible_and_hidden_profiles.hidden_browser_profiles,
                     );
-                    ui_sender
-                        .send(MessageToUi::HiddenBrowsersUpdated(ui_hidden_browsers))
-                        .ok();
+                    send_to_ui(
+                        &ui_sender,
+                        MessageToUi::HiddenBrowsersUpdated(ui_hidden_browsers),
+                    );
                 }
             }
             MessageToMain::MoveAppProfile(unique_id, move_to) => move_app_profile(
@@ -969,6 +993,12 @@ pub fn handle_messages_to_main(
     info!("Exiting waiting thread");
 }
 
+fn send_to_ui(ui_sender: &Sender<MessageToUi>, message: MessageToUi) {
+    if let Err(error) = ui_sender.send(message) {
+        warn!("Could not send message to UI: {error}");
+    }
+}
+
 #[instrument(skip_all)]
 pub fn prepare_ui(
     url_open_context: &UrlOpenContext,
@@ -1009,8 +1039,7 @@ pub fn open_link_if_matching_rule(
         let profile_maybe =
             visible_and_hidden_profiles.get_browser_profile_by_id(profile_id.as_str());
         if let Some(profile) = profile_maybe {
-            profile.open_link(url_open_context.cleaned_url.as_str(), incognito);
-            return true;
+            return profile.open_link(url_open_context.cleaned_url.as_str(), incognito);
         }
     }
 
@@ -1099,9 +1128,7 @@ fn move_app_profile(
 
     // 2. send visible_browser_profiles to gui
     let ui_browsers = UIState::real_to_ui_browsers(&visible_browser_profiles);
-    ui_sender
-        .send(MessageToUi::BrowsersUpdated(ui_browsers))
-        .ok();
+    send_to_ui(ui_sender, MessageToUi::BrowsersUpdated(ui_browsers));
 
     // 3. update config file
     let profile_ids_sorted: Vec<String> = visible_browser_profiles
@@ -1142,7 +1169,7 @@ pub enum MessageToUi {
 #[derive(Debug)]
 pub enum MessageToMain {
     Refresh,
-    OpenLink(usize, bool, String),
+    OpenLink(String, bool, String),
     // UrlOpenRequest is almost like LinkOpenedFromBundle, but triggers gui, not from gui
     UrlOpenRequest(String, String, Option<String>),
     UrlPassedToMain(String, String, BehavioralConfig),
