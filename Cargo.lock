@@ -845,7 +845,7 @@ dependencies = [
 
 [[package]]
 name = "browsers"
-version = "2026.8.1400"
+version = "2026.9.500"
 dependencies = [
  "anyhow",
  "configparser",
@@ -9038,7 +9038,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "2026.8.1400"
+version = "2026.9.500"
 dependencies = [
  "anyhow",
  "chrono",
