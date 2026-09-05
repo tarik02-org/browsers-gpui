@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Releases use `Y.M.DN` calendar versions, where `N` is the zero-based release
 number for that day.
 
+## [2026.9.500](https://github.com/tarik02-org/browsers-gpui/compare/browsers-2026.8.1400...browsers-2026.9.500) (2026-09-05)
+
+
+### Bug Fixes
+
+* keep macOS picker nonactivating ([#20](https://github.com/tarik02-org/browsers-gpui/issues/20)) ([76ead3d](https://github.com/tarik02-org/browsers-gpui/commit/76ead3d7d692c3ce7d52d6ef804f092ff71210a3))
+* keep macOS picker warm ([#17](https://github.com/tarik02-org/browsers-gpui/issues/17)) ([352543f](https://github.com/tarik02-org/browsers-gpui/commit/352543f1589809c55bb6f53dd04a2bfb7b47e422))
+* position macOS picker at cursor ([#16](https://github.com/tarik02-org/browsers-gpui/issues/16)) ([2aef9a2](https://github.com/tarik02-org/browsers-gpui/commit/2aef9a2fb48268f22292c5102e0fe2615517919e))
+* prevent daemon picker stalls ([#28](https://github.com/tarik02-org/browsers-gpui/issues/28)) ([b29acfb](https://github.com/tarik02-org/browsers-gpui/commit/b29acfb6fee737f3247112c541b0834f412f08ac))
+
+
+### Code Refactoring
+
+* split gui modules ([#21](https://github.com/tarik02-org/browsers-gpui/issues/21)) ([ff8e87f](https://github.com/tarik02-org/browsers-gpui/commit/ff8e87fc46d8ab814755ad87209c8ca2a81b11b0))
+
+
+### Documentation
+
+* document PR title style ([#18](https://github.com/tarik02-org/browsers-gpui/issues/18)) ([4150b39](https://github.com/tarik02-org/browsers-gpui/commit/4150b3921f8d5f840b23a9796ca13b49fdc1f15b))
+
+
+### Continuous Integration
+
+* add nightly releases ([#27](https://github.com/tarik02-org/browsers-gpui/issues/27)) ([45d695b](https://github.com/tarik02-org/browsers-gpui/commit/45d695bad8570722106462485b73f20b1f36d961))
+
 ## 2026.8.1400 (2026-08-14)
 
 
