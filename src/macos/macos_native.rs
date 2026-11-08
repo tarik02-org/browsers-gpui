@@ -1,6 +1,7 @@
 use gpui::{Bounds, Pixels, Point, point, px, size};
 use objc2::rc::Retained;
-use objc2::{AnyThread, MainThreadMarker};
+use objc2::runtime::AnyObject;
+use objc2::{AnyThread, MainThreadMarker, class, msg_send};
 use std::collections::HashSet;
 use std::ops::Deref;
 use std::path::PathBuf;
@@ -56,6 +57,39 @@ pub fn cursor_position() -> Option<(u64, Point<Pixels>, Bounds<Pixels>)> {
     }
 
     None
+}
+
+/// Bundle id of the app that sent the Apple Event AppKit is currently dispatching.
+///
+/// Only meaningful during event dispatch, e.g. inside `application:openURLs:`,
+/// which GPUI forwards synchronously to `on_open_urls`.
+pub fn current_apple_event_sender_bundle_id() -> Option<String> {
+    const KEY_ADDRESS_ATTR: u32 = u32::from_be_bytes(*b"addr");
+    const TYPE_APPLICATION_BUNDLE_ID: u32 = u32::from_be_bytes(*b"bund");
+
+    unsafe {
+        let manager: *mut AnyObject =
+            msg_send![class!(NSAppleEventManager), sharedAppleEventManager];
+        let event: *mut AnyObject = msg_send![manager, currentAppleEvent];
+        if event.is_null() {
+            return None;
+        }
+        let sender: *mut AnyObject =
+            msg_send![event, attributeDescriptorForKeyword: KEY_ADDRESS_ATTR];
+        if sender.is_null() {
+            return None;
+        }
+        let bundle_id: *mut AnyObject =
+            msg_send![sender, coerceToDescriptorType: TYPE_APPLICATION_BUNDLE_ID];
+        if bundle_id.is_null() {
+            return None;
+        }
+        let bundle_id: *mut NSString = msg_send![bundle_id, stringValue];
+        bundle_id
+            .as_ref()
+            .map(|bundle_id| bundle_id.to_string())
+            .filter(|bundle_id| !bundle_id.is_empty())
+    }
 }
 
 pub fn create_icon_for_app(full_path: &NSString, icon_path: &str) {

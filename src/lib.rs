@@ -2,7 +2,7 @@ use flume::Sender;
 use serde::{Deserialize, Serialize};
 use std::borrow::Borrow;
 use std::fmt::Debug;
-use std::process::{Command, exit};
+use std::process::Command;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
@@ -728,6 +728,16 @@ pub fn handle_messages_to_main(
                 send_to_ui(&ui_sender, MessageToUi::OpenLinkCompleted);
             }
             MessageToMain::UrlOpenRequest(from_bundle_id, url, activation_token) => {
+                debug!("Opening {url} from {from_bundle_id:?}");
+
+                if from_bundle_id == "com.apple.Safari" {
+                    // Safari opens the default browser on hard launch, see
+                    // https://github.com/Browsers-software/browsers/issues/79
+                    // Ignore the URL instead of exiting, so the warm macOS app stays alive.
+                    info!("Ignoring URL sent by Safari");
+                    continue;
+                }
+
                 let cleaned_url = unwrap_url(&url, behavioral_config);
                 let url_open_context = UrlOpenContext {
                     cleaned_url: cleaned_url.clone(),
@@ -745,63 +755,10 @@ pub fn handle_messages_to_main(
                     send_to_ui(
                         &ui_sender,
                         MessageToUi::UrlOpened {
-                            source_bundle_id: from_bundle_id,
                             url: cleaned_url,
                             activation_token,
                         },
                     );
-                }
-            }
-            MessageToMain::UrlPassedToMain(from_bundle_id, url, behavioral_config) => {
-                let new_modified_url = unwrap_url(url.as_str(), &behavioral_config);
-
-                send_to_ui(
-                    &ui_sender,
-                    MessageToUi::UrlOpened {
-                        source_bundle_id: from_bundle_id,
-                        url: new_modified_url,
-                        activation_token: None,
-                    },
-                );
-            }
-            MessageToMain::LinkOpenedFromBundle(from_bundle_id, url) => {
-                // TODO: do something once we have rules to
-                //       prioritize/default browsers based on source app and/or url
-                debug!("source_bundle_id: {}", from_bundle_id.clone());
-
-                if from_bundle_id == "com.apple.Safari" {
-                    // workaround for weird bug where Safari opens default browser on hard launch
-                    // see https://github.com/Browsers-software/browsers/issues/79
-                    // We might need to remove this workaround if we want to allow Safari
-                    // to open Browsers via some extension
-                    info!("Safari has a weird bug and launched Browsers. Exiting Browsers.",);
-                    exit(0x0100);
-                }
-                debug!("url: {}", url);
-
-                let new_modified_url = url;
-                //let new_modified_url = unwrap_url(url.as_str());
-                let url_open_context = UrlOpenContext {
-                    cleaned_url: new_modified_url.clone(),
-                    source_app_maybe: Some(from_bundle_id.clone()),
-                };
-
-                let opening_profile_id_maybe = opening_rules_and_default_profile
-                    .get_rule_for_source_app_and_url(&url_open_context);
-
-                if let Some(opening_profile_id) = opening_profile_id_maybe {
-                    let profile_and_options = opening_profile_id.clone();
-                    let profile_id = profile_and_options.profile;
-                    let incognito = profile_and_options.incognito;
-
-                    let profile_maybe =
-                        visible_and_hidden_profiles.get_browser_profile_by_id(profile_id.as_str());
-
-                    if let Some(profile) = profile_maybe {
-                        if profile.open_link(new_modified_url.as_str(), incognito) {
-                            send_to_ui(&ui_sender, MessageToUi::OpenLinkCompleted);
-                        }
-                    }
                 }
             }
             MessageToMain::SetBrowsersAsDefaultBrowser => {
@@ -1158,7 +1115,6 @@ pub enum MessageToUi {
     OpenLinkCompleted,
     BehaviorUpdated(BehavioralConfig),
     UrlOpened {
-        source_bundle_id: String,
         url: String,
         activation_token: Option<String>,
     },
@@ -1170,10 +1126,9 @@ pub enum MessageToUi {
 pub enum MessageToMain {
     Refresh,
     OpenLink(String, bool, String),
-    // UrlOpenRequest is almost like LinkOpenedFromBundle, but triggers gui, not from gui
+    /// An incoming URL from a source app bundle id (empty if unknown), with an
+    /// optional activation token. Opening rules run before the picker is shown.
     UrlOpenRequest(String, String, Option<String>),
-    UrlPassedToMain(String, String, BehavioralConfig),
-    LinkOpenedFromBundle(String, String),
     SetBrowsersAsDefaultBrowser,
     HideAppProfile(String),
     HideAllProfiles(String),

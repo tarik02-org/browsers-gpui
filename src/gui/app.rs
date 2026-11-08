@@ -33,7 +33,7 @@ use super::model::{
     SettingsTab, UIBrowser, UIProfileAndIncognito, UISettingsRule, UIState, get_filtered_browsers,
 };
 use crate::paths;
-use crate::utils::{BehavioralConfig, ConfiguredTheme};
+use crate::utils::ConfiguredTheme;
 use crate::{MessageToMain, MessageToUi, MoveTo};
 
 #[path = "picker.rs"]
@@ -458,20 +458,16 @@ impl BrowserApp {
                 cx.notify();
             }
             MessageToUi::UrlOpened {
-                source_bundle_id,
                 url,
                 activation_token,
             } => {
-                self.state.set_url(url.clone());
+                self.state.set_url(url);
                 if self.persistent {
                     self.open_daemon_picker(activation_token, cx);
                 } else if let Some(window) = window.as_deref_mut() {
                     self.resize_picker(window);
                     self.show_picker(window, cx);
                 }
-                self.main_sender
-                    .send(MessageToMain::LinkOpenedFromBundle(source_bundle_id, url))
-                    .ok();
             }
             MessageToUi::BrowsersUpdated(browsers) => {
                 let browsers = Arc::new(browsers);
@@ -563,7 +559,6 @@ pub fn run(
     let unwrap_urls = Arc::new(AtomicBool::new(
         state.ui_settings.behavioral_settings.unwrap_urls,
     ));
-    let open_url_flag = unwrap_urls.clone();
     let open_url_sender = main_sender.clone();
 
     let application = gpui_platform::application()
@@ -576,14 +571,20 @@ pub fn run(
             QuitMode::LastWindowClosed
         });
     application.on_open_urls(move |urls| {
+        // The sending Apple Event is only reachable while AppKit dispatches it,
+        // so resolve the source app here rather than on the backend thread.
+        #[cfg(target_os = "macos")]
+        let source_bundle_id =
+            crate::macos::macos_native::current_apple_event_sender_bundle_id().unwrap_or_default();
+        #[cfg(not(target_os = "macos"))]
+        let source_bundle_id = String::new();
+
         for url in urls {
             open_url_sender
-                .send(MessageToMain::UrlPassedToMain(
-                    String::new(),
+                .send(MessageToMain::UrlOpenRequest(
+                    source_bundle_id.clone(),
                     url,
-                    BehavioralConfig {
-                        unwrap_urls: open_url_flag.load(Ordering::Relaxed),
-                    },
+                    None,
                 ))
                 .ok();
         }
